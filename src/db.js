@@ -156,10 +156,40 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_vault_entries_user ON vault_entries(user_id);
 
+  CREATE TABLE IF NOT EXISTS invite_codes (
+    id         SERIAL PRIMARY KEY,
+    code       TEXT NOT NULL UNIQUE,
+    role       TEXT NOT NULL DEFAULT 'viewer',
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at    TIMESTAMPTZ DEFAULT NULL,
+    used_by    INTEGER REFERENCES users(id),
+    revoked    BOOLEAN NOT NULL DEFAULT false
+  );
+
+  CREATE TABLE IF NOT EXISTS recovery_codes (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    code_hash  TEXT NOT NULL,
+    used_at    TIMESTAMPTZ DEFAULT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
+
   -- Columns added after the initial release (no-ops on a fresh DB).
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL DEFAULT 'admin';
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS theme      TEXT DEFAULT NULL;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS vault_salt TEXT DEFAULT NULL;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS role          TEXT NOT NULL DEFAULT 'admin';
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS theme         TEXT DEFAULT NULL;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS vault_salt    TEXT DEFAULT NULL;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret   TEXT DEFAULT NULL;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled  BOOLEAN NOT NULL DEFAULT false;
+  -- Failed-login counter + permanent lock, separate from the short in-memory rate
+  -- limiter in server.js: this one survives a restart and only an admin can clear it
+  -- (PUT /api/users/:id/unlock), whereas the in-memory limiter just expires on its own.
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS locked        BOOLEAN NOT NULL DEFAULT false;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_at     TIMESTAMPTZ DEFAULT NULL;
 `;
 
 async function initSchema() {

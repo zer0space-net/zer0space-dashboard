@@ -22,6 +22,9 @@ services:
       - DASHBOARD_HASH=${DASHBOARD_HASH:-}
       # SESSION_SECRET  : optional — auto-generated and stored in the DB if not set.
       - SESSION_SECRET=${SESSION_SECRET:-}
+      # TOTP_ENC_KEY    : encrypts 2FA secrets at rest — same fallback behaviour as
+      #                   SESSION_SECRET (auto-generated and stored in the DB if not set).
+      - TOTP_ENC_KEY=${TOTP_ENC_KEY:-}
       # ── PostgreSQL (zer0space-postgres, standalone on zs-state-01) ─────────────────────
       # Either DATABASE_URL as a whole, OR the individual values below.
       # NEVER put the password here — set it as a Portainer env var or a Swarm secret.

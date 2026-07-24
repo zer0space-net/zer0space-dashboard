@@ -219,6 +219,70 @@
             </form>
           </div>
 
+          <!-- Two-Factor Authentication -->
+          <div class="settings-section">
+            <h3 class="settings-heading" data-i18n="twofa.title">Zwei-Faktor-Authentifizierung</h3>
+
+            <div id="twofaStatusOff">
+              <p class="settings-hint" data-i18n="twofa.disabledHint">Zusätzlicher Code aus einer Authenticator-App beim Anmelden.</p>
+              <button type="button" class="btn-primary" id="twofaEnableBtn" data-i18n="twofa.enable">2FA aktivieren</button>
+            </div>
+
+            <div id="twofaStatusOn" style="display:none">
+              <span class="twofa-enabled-badge"><i class="ti ti-shield-check"></i> <span data-i18n="twofa.enabledBadge">2FA aktiviert</span></span>
+              <button type="button" class="btn-sm btn-sm-danger" id="twofaDisableBtn" style="margin-left:10px" data-i18n="twofa.disable">2FA deaktivieren</button>
+            </div>
+
+            <!-- Step 1: confirm current password before starting setup -->
+            <form class="settings-form" id="twofaPasswordForm" style="display:none;margin-top:14px" novalidate>
+              <div class="form-group">
+                <label for="tf-password" data-i18n="twofa.currentPassword">Aktuelles Passwort</label>
+                <input id="tf-password" type="password" autocomplete="current-password" placeholder="••••••••••••">
+              </div>
+              <button type="submit" class="btn-primary" id="twofaPasswordBtn" data-i18n="common.continue">Weiter</button>
+              <button type="button" class="btn-sm" id="twofaPasswordCancel" data-i18n="common.cancel">Abbrechen</button>
+              <div class="settings-msg" id="twofaPasswordMsg"></div>
+            </form>
+
+            <!-- Step 2: scan QR + confirm a code -->
+            <div id="twofaSetupArea" style="display:none;margin-top:14px">
+              <p class="settings-hint" data-i18n="twofa.scanHint">Mit einer Authenticator-App scannen (Google Authenticator, Authy, …):</p>
+              <div id="twofaQr" style="background:#fff;padding:12px;border-radius:10px;display:inline-block"></div>
+              <p class="settings-hint" data-i18n="twofa.manualHint">Oder manuell eingeben:</p>
+              <code id="twofaSecretText" style="user-select:all;word-break:break-all"></code>
+              <form id="twofaVerifyForm" novalidate style="margin-top:12px">
+                <div class="form-group">
+                  <label for="tf-code" data-i18n="twofa.enterCode">6-stelliger Code</label>
+                  <input id="tf-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+                </div>
+                <button type="submit" class="btn-primary" id="twofaVerifyBtn" data-i18n="twofa.confirm">Bestätigen</button>
+                <div class="settings-msg" id="twofaVerifyMsg"></div>
+              </form>
+            </div>
+
+            <!-- Step 3: recovery codes, shown exactly once -->
+            <div id="twofaRecoveryArea" style="display:none;margin-top:14px">
+              <p class="settings-hint" data-i18n="twofa.recoveryHint">Wiederherstellungscodes — jeder nur einmal verwendbar. Jetzt sichern, sie werden nicht wieder angezeigt.</p>
+              <div id="twofaRecoveryCodes" style="font-family:monospace;line-height:1.8"></div>
+              <button type="button" class="btn-primary" id="twofaRecoveryDoneBtn" style="margin-top:10px" data-i18n="twofa.recoveryDone">Gesichert — fertig</button>
+            </div>
+
+            <!-- Disable flow: password + current TOTP code -->
+            <form class="settings-form" id="twofaDisableForm" style="display:none;margin-top:14px" novalidate>
+              <div class="form-group">
+                <label for="tf-disable-password" data-i18n="twofa.currentPassword">Aktuelles Passwort</label>
+                <input id="tf-disable-password" type="password" autocomplete="current-password" placeholder="••••••••••••">
+              </div>
+              <div class="form-group">
+                <label for="tf-disable-code" data-i18n="twofa.enterCode">6-stelliger Code</label>
+                <input id="tf-disable-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456">
+              </div>
+              <button type="submit" class="btn-primary" id="twofaDisableSubmitBtn" data-i18n="twofa.disable">2FA deaktivieren</button>
+              <button type="button" class="btn-sm" id="twofaDisableCancel" data-i18n="common.cancel">Abbrechen</button>
+              <div class="settings-msg" id="twofaDisableMsg"></div>
+            </form>
+          </div>
+
           <!-- Language -->
           <div class="settings-section">
             <h3 class="settings-heading" data-i18n="settings.language">Sprache</h3>
@@ -345,6 +409,31 @@
             </div>
           </div>
 
+          <!-- Invite codes (admin only) -->
+          <div class="settings-section admin-only" id="sectionInvites">
+            <h3 class="settings-heading" data-i18n="invites.title">Einladungscodes</h3>
+            <div id="inviteList" class="user-list"></div>
+
+            <div class="settings-subsection">
+              <h4 class="settings-subheading" data-i18n="invites.new">Neue Einladung</h4>
+              <form class="settings-form" id="createInviteForm" novalidate>
+                <div class="form-group">
+                  <label for="inv-role" data-i18n="users.role">Rolle</label>
+                  <select id="inv-role" name="role">
+                    <option value="viewer" data-i18n="users.roleViewer">Viewer — nur lesen</option>
+                    <option value="admin" data-i18n="users.roleAdmin">Admin — voller Zugriff</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="inv-hours" data-i18n="invites.expiresIn">Gültig für (Stunden)</label>
+                  <input id="inv-hours" name="expiresInHours" type="number" min="1" max="720" value="72">
+                </div>
+                <button type="submit" class="btn-primary" id="createInviteBtn" data-i18n="invites.create">Code erzeugen</button>
+                <div class="settings-msg" id="createInviteMsg"></div>
+              </form>
+            </div>
+          </div>
+
         </div>
 
       </div><!-- /content -->
@@ -440,6 +529,10 @@
   </div>
 
   <script src="/i18n.js"></script>
+  <!-- QR rendering for 2FA setup — vendored (MIT, Kazuhiko Arase) rather than an
+       npm dependency + server-side image: CSP script-src is 'self' only (no CDN
+       for scripts), and this keeps the QR entirely client-side, never persisted. -->
+  <script src="/vendor/qrcode-generator.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -3,17 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>zer0space — Login</title>
-  <!-- May, the zer0space mascot, as the tab icon. The PNGs are circular crops
-       with transparent corners so the icon reads as a badge, not a black square.
-       There is deliberately no <link> to favicon.svg alongside these: Firefox
-       prefers an SVG icon over a PNG regardless of declaration order, so leaving
-       it in would show the old mark in some browsers and May in others. -->
+  <title>zer0space — Register</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/img/may-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="/img/may-64.png">
   <link rel="apple-touch-icon" href="/img/may-180.png">
-  <!-- The logo is the largest element on this page and the only image; fetching
-       it early keeps it from popping in after the card has animated in. -->
   <link rel="preload" as="image" href="/img/may-256.jpg">
   <style>
     :root {
@@ -35,17 +28,8 @@
       overflow: hidden;
     }
 
-    /* Starfield canvas — lowest layer */
-    #star-canvas {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 0;
-    }
+    #star-canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
 
-    /* Ambient glow — above stars, below card. Neutral/white, not tinted. */
     body::before {
       content: '';
       position: fixed;
@@ -78,48 +62,29 @@
       to   { opacity: 1; transform: translateY(0) scale(1); }
     }
 
-    .logo {
-      text-align: center;
-      margin-bottom: 28px;
-    }
+    .logo { text-align: center; margin-bottom: 28px; }
     .logo-mark {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 12px;
-      animation: logoIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both, logoGlow 4s ease-in-out 0.6s infinite;
+      animation: logoIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both;
       border-radius: 50%;
     }
-    /* The source image is a square with the mascot inside a blue ring; the
-       circular mask drops the black corners so it sits on the card as a badge. */
     .logo-mark img {
       display: block;
       width: 88px;
       height: 88px;
       border-radius: 50%;
       object-fit: cover;
-      box-shadow:
-        0 0 0 1px rgba(255,255,255,0.10),
-        0 10px 30px rgba(0,0,0,0.55);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 10px 30px rgba(0,0,0,0.55);
     }
     @keyframes logoIn {
       from { opacity: 0; transform: scale(0.7) rotate(-8deg); }
       to   { opacity: 1; transform: scale(1) rotate(0); }
     }
-    @keyframes logoGlow {
-      0%, 100% { filter: drop-shadow(0 0 0 rgba(255,255,255,0)); }
-      50%       { filter: drop-shadow(0 0 12px rgba(255,255,255,0.16)); }
-    }
-    .logo h1 {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-    }
-    .logo p {
-      font-size: 13px;
-      color: rgba(255,255,255,0.38);
-      margin-top: 3px;
-    }
+    .logo h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo p { font-size: 13px; color: rgba(255,255,255,0.38); margin-top: 3px; }
 
     .form-group { margin-bottom: 14px; }
     .form-group label {
@@ -148,9 +113,8 @@
       background: rgba(255,255,255,0.07);
     }
     .form-group input::placeholder { color: rgba(255,255,255,0.18); }
+    .form-group .hint { font-size: 11px; color: rgba(255,255,255,0.30); margin-top: 5px; }
 
-    /* Black button. On a near-black card the fill alone would be invisible, so
-       the shape is carried by the hairline border and the drop shadow. */
     .btn {
       width: 100%;
       margin-top: 8px;
@@ -174,10 +138,7 @@
       box-shadow: 0 8px 26px rgba(0,0,0,0.65);
     }
     .btn:active { transform: none; background: #000; }
-    .btn:focus-visible {
-      outline: 2px solid rgba(255,255,255,0.55);
-      outline-offset: 2px;
-    }
+    .btn:focus-visible { outline: 2px solid rgba(255,255,255,0.55); outline-offset: 2px; }
     .btn:disabled {
       opacity: 0.45;
       cursor: default;
@@ -199,15 +160,19 @@
     }
     .error-msg.visible { display: block; animation: shake 0.35s ease; }
 
-    /* Language toggle (DE / EN).
-       This page does NOT load style.css — it is fully self-contained — so the
-       toggle is styled here.
+    .success-msg {
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: rgba(48,209,88,0.12);
+      border: 1px solid rgba(48,209,88,0.25);
+      border-radius: 10px;
+      font-size: 13px;
+      color: #30d158;
+      text-align: center;
+      display: none;
+    }
+    .success-msg.visible { display: block; }
 
-       It sits in the page corner rather than in the card: it is a page-level
-       preference, not a login field, and inside the card it competed with the
-       submit button for attention. Everything here is deliberately low-contrast
-       — the earlier bright-white treatment read as the loudest thing on a page
-       whose whole point is the form. */
     .lang-toggle {
       position: fixed;
       left: 20px;
@@ -225,13 +190,11 @@
       opacity: 0.65;
       transition: opacity 0.2s, background 0.2s, border-color 0.2s;
     }
-    .lang-toggle:hover,
-    .lang-toggle:focus-within {
+    .lang-toggle:hover, .lang-toggle:focus-within {
       opacity: 1;
       background: rgba(255,255,255,0.06);
       border-color: rgba(255,255,255,0.12);
     }
-
     .lang-btn {
       display: flex;
       align-items: center;
@@ -248,17 +211,10 @@
       transition: background 0.18s, color 0.18s;
     }
     .lang-btn:hover { color: rgba(255,255,255,0.75); }
-    .lang-btn:focus-visible {
-      outline: 1px solid rgba(255,255,255,0.45);
-      outline-offset: 1px;
-    }
-    .lang-btn.active {
-      background: rgba(255,255,255,0.10);
-      color: rgba(255,255,255,0.95);
-    }
+    .lang-btn:focus-visible { outline: 1px solid rgba(255,255,255,0.45); outline-offset: 1px; }
+    .lang-btn.active { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.95); }
 
-    /* On short viewports the fixed corner position can collide with the card. */
-    @media (max-height: 560px) {
+    @media (max-height: 700px) {
       .lang-toggle { position: static; margin: 22px auto 0; opacity: 1; }
     }
 
@@ -277,61 +233,48 @@
   <div class="card">
     <div class="logo">
       <div class="logo-mark">
-        <!-- May, the zer0space mascot. Width/height are set on the tag as well
-             as in CSS so the card does not reflow once the image lands. -->
         <img src="/img/may-256.jpg" width="88" height="88"
              data-i18n-alt="login.logoAlt" alt="May, das zer0space-Maskottchen">
       </div>
-      <h1>zer0space</h1>
-      <p data-i18n="login.subtitle">Homelab Dashboard</p>
+      <h1 data-i18n="register.title">Konto erstellen</h1>
+      <p data-i18n="register.subtitle">Mit Einladungscode registrieren</p>
     </div>
 
-    <form id="loginForm" novalidate>
+    <form id="registerForm" novalidate>
+      <div class="form-group">
+        <label for="inviteCode" data-i18n="register.inviteCode">Einladungscode</label>
+        <input id="inviteCode" name="inviteCode" type="text" autocomplete="off"
+               placeholder="a1b2c3…" required autofocus>
+      </div>
       <div class="form-group">
         <label for="username" data-i18n="login.username">Benutzername</label>
         <input id="username" name="username" type="text" autocomplete="username"
-               placeholder="admin" required autofocus>
+               placeholder="max" required>
       </div>
       <div class="form-group">
         <label for="password" data-i18n="login.password">Passwort</label>
-        <input id="password" name="password" type="password" autocomplete="current-password"
-               placeholder="••••••••" required>
+        <input id="password" name="password" type="password" autocomplete="new-password"
+               placeholder="••••••••••••" required minlength="12">
+        <div class="hint" data-i18n="register.pwHint">Mindestens 12 Zeichen</div>
       </div>
-      <button type="submit" class="btn" id="submitBtn" data-i18n="login.submit">Anmelden</button>
-      <div class="error-msg" id="errorMsg" data-i18n="login.invalid">Ungültige Zugangsdaten</div>
+      <button type="submit" class="btn" id="submitBtn" data-i18n="register.submit">Registrieren</button>
+      <div class="error-msg" id="errorMsg" data-i18n="register.invalid">Registrierung fehlgeschlagen</div>
+      <div class="success-msg" id="successMsg" data-i18n="register.success">Konto erstellt — du kannst dich jetzt anmelden.</div>
     </form>
 
-    <!-- Step 2, only shown after the password step returns 202 requires_2fa.
-         Hidden (not removed) rather than a separate page: the card, starfield
-         and language toggle stay exactly as they are, only the form swaps. -->
-    <form id="twoFaForm" novalidate style="display:none">
-      <div class="form-group">
-        <label for="twoFaCode" data-i18n="login.twofaLabel">Authenticator-Code</label>
-        <input id="twoFaCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code"
-               placeholder="123456" maxlength="12" data-i18n-ph="login.twofaPlaceholder"
-               style="letter-spacing:4px;text-align:center;font-size:20px">
-      </div>
-      <button type="submit" class="btn" id="twoFaSubmitBtn" data-i18n="login.twofaSubmit">Bestätigen</button>
-      <div class="error-msg" id="twoFaErrorMsg" data-i18n="login.twofaInvalid">Ungültiger Code</div>
-    </form>
-
-    <p style="text-align:center;margin-top:18px;font-size:13px;color:rgba(255,255,255,0.38)" id="registerHint">
-      <span data-i18n="login.noAccount">Noch kein Konto?</span>
-      <a href="/register" style="color:rgba(255,255,255,0.65)" data-i18n="login.registerLink">Registrieren</a>
+    <p style="text-align:center;margin-top:18px;font-size:13px;color:rgba(255,255,255,0.38)">
+      <span data-i18n="register.haveAccount">Schon ein Konto?</span>
+      <a href="/login" style="color:rgba(255,255,255,0.65)" data-i18n="register.loginLink">Anmelden</a>
     </p>
   </div>
 
-  <!-- Language toggle, also available before signing in.
-       It is a sibling of the card, not a child: the card's backdrop-filter makes
-       it a containing block for fixed descendants, so a toggle nested inside it
-       would anchor to the card instead of to the viewport corner. -->
   <div class="lang-toggle" role="group" data-i18n-aria="top.language">
     <button type="button" class="lang-btn" data-lang="de">DE</button>
     <button type="button" class="lang-btn" data-lang="en">EN</button>
   </div>
 
   <script src="/i18n.js"></script>
-  <script src="/login.js"></script>
+  <script src="/register.js"></script>
   <script src="/starfield.js" defer></script>
 </body>
 </html>

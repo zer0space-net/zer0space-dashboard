@@ -1118,6 +1118,36 @@ body:not(.is-admin) .add-card     { display: none !important; }
   margin-left: 4px;
 }
 
+/* ---- 2FA / lockout / invite status badges — same shape as .role-badge ---- */
+.twofa-badge, .locked-badge, .invite-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+.twofa-badge.on   { background: rgba(48,209,88,0.14);  color: var(--green, #30d158); }
+.twofa-badge.off  { background: rgba(255,255,255,0.07); color: var(--text-3); }
+.locked-badge     { background: rgba(255,69,58,0.14);  color: var(--red); }
+.invite-status-badge.active  { background: rgba(48,209,88,0.14); color: var(--green, #30d158); }
+.invite-status-badge.used,
+.invite-status-badge.expired,
+.invite-status-badge.revoked { background: rgba(255,255,255,0.07); color: var(--text-3); }
+
+.twofa-enabled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(48,209,88,0.12);
+  color: var(--green, #30d158);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* ---- User list ---- */
 .user-list {
   display: flex;

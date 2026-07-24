@@ -13,7 +13,8 @@ A self-hosted homelab dashboard for the zer0space Docker Swarm cluster. It provi
   Glances service.
 - **Backup status** — reads the per-node JSON files the node backup script drops
   into the shared storage directory.
-- **User management** — multiple accounts with `admin` / `user` roles.
+- **User management** — multiple accounts with `admin` / `user` roles, invite-code
+  self-registration, optional per-user TOTP 2FA, and admin-controlled account lockout.
 - **Password vault** — per-user encrypted credential storage (see the security
   section below; this is the part to be most careful with).
 
@@ -26,7 +27,7 @@ It runs as a single container, one replica, behind a Cloudflare Tunnel.
 | Runtime   | Node.js 20 (alpine) |
 | HTTP      | Express 4 |
 | Sessions  | `express-session` (in-memory store, secret persisted in the DB) |
-| Security  | `helmet` (CSP, HSTS), `bcryptjs` (password hashing, cost 12) |
+| Security  | `helmet` (CSP, HSTS), `bcryptjs` (password hashing, cost 12), TOTP 2FA + CSRF hand-rolled on Node's built-in `crypto` (no `otplib`/`speakeasy`) |
 | Uploads   | `multer` (background images only, JPG/PNG/WebP) |
 | Database  | PostgreSQL via `pg` — **no ORM**, plain parameterised SQL |
 | Frontend  | Vanilla JS, no framework, no build step |
@@ -36,7 +37,12 @@ There is **no build step and no bundler**. `src/public/` is served as-is by
 being asked — the no-build property is deliberate.
 
 There is **no test suite** at present. If you add non-trivial logic, say so
-rather than silently assuming it is covered.
+rather than silently assuming it is covered — this applies in particular to the
+2FA/invite/lockout code added in the `feat: totp 2fa authentication` and
+`security: complete audit` changes: it has been reviewed carefully but not
+exercised against a running Postgres instance in this environment (no Node/npm
+was available to run it here). Test the login → 2FA → recovery-code and
+invite → register flows end-to-end before relying on them in production.
 
 ## Layout
 
@@ -44,15 +50,22 @@ rather than silently assuming it is covered.
 src/
 ├── server.js         Express app: middleware, auth, all routes except the vault
 ├── db.js             PostgreSQL pool + query helpers, schema bootstrap
-├── vault-crypto.js   PBKDF2 key derivation + AES-256-GCM for vault entries
+├── vault-crypto.js   PBKDF2 key derivation + AES-256-GCM (reused for TOTP secrets)
+├── totp.js           RFC 4226/6238 HOTP/TOTP + base32, no external dependency
 ├── routes/
 │   └── vault.js      Vault CRUD router (mounted at /api/vault)
 └── public/           Static frontend
     ├── i18n.js       German/English dictionary + applyI18n() (load FIRST)
-    ├── app.js        Dashboard logic
-    ├── login.js      Login form
+    ├── app.js        Dashboard logic (incl. 2FA settings UI, invite admin UI)
+    ├── login.js      Login form + 2FA verify step
+    ├── register.js   Invite-code self-registration form
     ├── index.html    Dashboard markup
     ├── login.html    Login page
+    ├── register.html Registration page
+    ├── vendor/
+    │   └── qrcode-generator.js   Vendored MIT QR encoder (Kazuhiko Arase) — renders
+    │                             the 2FA setup QR client-side, no server-side image
+    │                             and no npm dependency; see "2FA" below for why.
     └── style.css
 scripts/
 └── migrate-sqlite-to-pg.js   One-shot migration from the pre-v3 SQLite file
@@ -140,17 +153,55 @@ decrypt vault entries. Two consequences that are easy to break by accident:
   plaintext), so it deliberately wipes that user's vault instead of leaving rows
   behind that can never be decrypted. This is intentional, not a bug.
 
+**Two-factor authentication (TOTP).** Optional per user, enabled from Settings.
+Login becomes two steps once `users.totp_enabled` is true: `/api/login` returns
+`202 { requires_2fa: true }` with a *pending* session (only `pending2faUserId`,
+not `userId` — `requireAuth` cannot be satisfied by it), then `/api/2fa/login`
+verifies the code and promotes it to a full session. `totp_secret` is AES-256-GCM
+encrypted at rest with a server-wide key (`getTotpEncryptionKey()` in
+`server.js`, same Docker-Secret → env → DB → auto-generated priority as the
+session secret) — deliberately **not** derived from the user's password like the
+vault key, since verifying a 2FA code must not require the plaintext password.
+8 bcrypt-hashed single-use recovery codes are generated at setup and shown
+exactly once. TOTP itself is implemented from scratch in `totp.js` (RFC 4226/6238
+over Node's built-in `crypto`) and the setup QR is rendered client-side from a
+vendored QR encoder — see `src/public/vendor/` above — rather than pulling in
+`otplib`/`qrcode` as npm dependencies: the algorithm is small and fully specified,
+and this keeps the "no native runtime dependency" property intact.
+
+**Invite-gated registration.** There is no open sign-up. An admin mints a code
+(`POST /api/invites`, 192-bit random, single-use, expires) and hands it to the
+new user out-of-band; `POST /api/register` consumes it. Invalid, expired,
+revoked and already-used codes all return the identical generic error — never
+reveal which, so a guesser can't learn anything from the response.
+
+**Account lockout.** Separate from the short-lived in-memory IP+username rate
+limiter: `users.failed_logins` is a persistent counter, and 10 failures sets
+`users.locked = true`. A locked account fails login the same generic way as a
+wrong password (the lock state is only ever visible to admins, in the user
+list) — only `PUT /api/users/:id/unlock` (admin) clears it, there is no
+self-service or time-based auto-unlock.
+
 Other invariants:
 
 - Every route after `app.use(requireAuth)` is authenticated; admin-only routes take
   `requireAdmin` explicitly. When adding a route, place it deliberately relative to
   that boundary.
+- Every state-changing route (`POST`/`PUT`/`DELETE` under `/api/`) takes
+  `requireCsrf` — a timing-safe double-submit-token check — except the handful that
+  run before any session/token exists (`/api/login`, `/api/register`) or would
+  create a chicken-and-egg problem (`/api/2fa/login`, since a wrong code must still
+  count as a failed attempt). The frontend's `apiFetch()` in `app.js` attaches the
+  header automatically; a new mutating fetch call MUST use it (or `vaultFetch`,
+  which is the same function) instead of bare `fetch()`.
 - All SQL is parameterised. Never build SQL by string concatenation.
 - CSP `script-src` has **no** `'unsafe-inline'` — inline scripts are blocked on
   purpose. `style-src` does allow inline styles (metric bar widths set via
   `innerHTML`). Do not loosen `script-src` to make something convenient work.
 - `FORCE_HTTPS=true` enables HSTS and `upgrade-insecure-requests`; it defaults to
   false so plain HTTP on the LAN keeps working.
+- Passwords must be at least 12 characters — enforced in every path that sets one
+  (change-password, admin create/reset, register), backend AND frontend.
 - The last admin cannot be deleted or demoted, and users cannot delete their own
   account. Keep those guards.
 - **Never commit secrets.** No real passwords, hashes, tokens or connection strings
@@ -160,11 +211,20 @@ Other invariants:
 
 - The image is built by GitHub Actions (`.github/workflows/dashboard.yml`) on every
   push to `main` that touches `src/`, `Dockerfile` or the manifests, and pushed to
-  `ghcr.io/zer0space-net/zer0space-dashboard:latest`.
+  `ghcr.io/zer0space-net/zer0space-dashboard:latest` **and** `:<git-sha>` (the SHA
+  tag exists purely for rollback — redeploy a known-good tag if `:latest` breaks).
+  Authenticates with `secrets.CR_PAT` (classic PAT, `write:packages`), not
+  `GITHUB_TOKEN` — GHCR packages created outside the repo's own Actions run reject
+  the auto-generated token regardless of the workflow's `permissions:` block.
 - The Dockerfile is a two-stage build; the runtime image installs production deps
   only (`npm ci --omit=dev`). `better-sqlite3` is a devDependency used solely by the
   migration script, which keeps the runtime image free of a native build toolchain.
   Keep it that way — adding a native runtime dependency reintroduces python3/make/g++.
+- The runtime container runs as the image's built-in unprivileged `node` user, not
+  root, and defines a `HEALTHCHECK` against `GET /login`. Because of this, the `/data`
+  volume (NFS-mounted background images + backup-status JSON) must be writable by
+  uid 1000 on the export side — check this if uploads or backup-status start failing
+  after a redeploy on a fresh export.
 - `docker-compose.yml` lives in the repo root and is deployed as a Swarm stack via
   Portainer. It defines three services: `dashboard`, `socketproxy`
   (`tecnativa/docker-socket-proxy`, read-only, only SERVICES/NODES/TASKS enabled)

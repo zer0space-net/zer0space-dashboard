@@ -10,7 +10,8 @@ encrypted password vault, in a single Node.js container.
 - **Cluster status** — Swarm nodes, services and tasks via a read-only Docker socket proxy
 - **Host metrics** — CPU, RAM, disk and uptime per node, collected from Glances
 - **Backup status** — per-node backup results read from shared storage
-- **Users & roles** — multiple accounts, `admin` / `user` separation
+- **Users & roles** — multiple accounts, `admin` / `user` separation, invite-code
+  self-registration, optional per-user TOTP two-factor authentication
 - **Password vault** — per-user AES-256-GCM encrypted credentials, keyed from the
   user's own password (the server cannot decrypt them without an active session)
 - **Themes & background** — light/dark per user, admin-uploadable background image
@@ -89,6 +90,7 @@ for the full list with comments. The essentials:
 | `DATABASE_URL` *or* `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` | PostgreSQL connection (`DATABASE_URL` wins if set) |
 | `DASHBOARD_USER` / `DASHBOARD_PASS` / `DASHBOARD_HASH` | Initial admin account, used only on first start of an empty DB |
 | `SESSION_SECRET` | Session signing key; auto-generated and stored in the DB if unset |
+| `TOTP_ENC_KEY` | Encrypts 2FA secrets at rest; auto-generated and stored in the DB if unset |
 | `COOKIE_SECURE` / `FORCE_HTTPS` | Enable when running behind HTTPS (Cloudflare Tunnel) |
 | `GLANCES_SERVICE` / `GLANCES_PORT` | Where to collect host metrics from |
 | `DOCKER_PROXY_URL` | Read-only Docker socket proxy endpoint |
@@ -96,8 +98,24 @@ for the full list with comments. The essentials:
 
 Secrets can be provided as **Docker Swarm secrets** instead of environment
 variables — the server reads `/run/secrets/db_password`,
-`/run/secrets/dashboard_hash` and `/run/secrets/session_secret` first and only then
-falls back to the env vars. This is the recommended path for production.
+`/run/secrets/dashboard_hash`, `/run/secrets/session_secret` and
+`/run/secrets/totp_enc_key` first and only then falls back to the env vars. This
+is the recommended path for production.
+
+### Two-factor authentication
+
+Any user can turn on TOTP 2FA from Settings (current password required to start,
+QR code + manual secret shown once, 8 single-use recovery codes shown once at
+confirmation). It is optional and per-user — nothing here is required to run the
+dashboard. If a user loses their device, an admin can force it off from the user
+list (`Reset 2FA`) without needing the old code.
+
+### Invite-gated registration
+
+There is no open sign-up page. An admin generates an invite code from Settings →
+Invite codes (role + expiry), and hands it to the new user directly. `/register`
+consumes the code once; expired, revoked or already-used codes are rejected with
+the same generic message either way.
 
 ## Deployment
 
@@ -107,7 +125,14 @@ builds the image and pushes it to:
 
 ```
 ghcr.io/zer0space-net/zer0space-dashboard:latest
+ghcr.io/zer0space-net/zer0space-dashboard:<git-sha>
 ```
+
+The SHA tag exists purely for rollback: redeploy that exact tag in Portainer if
+`:latest` turns out broken. Authentication uses `secrets.CR_PAT` (a classic PAT
+with `write:packages`), not the default `GITHUB_TOKEN` — GHCR rejects the
+auto-generated token for a package whose access settings don't already include
+this repository.
 
 The stack is deployed to Docker Swarm from [`docker-compose.yml`](docker-compose.yml)
 via Portainer. It defines three services:
@@ -146,11 +171,17 @@ Add `--dry-run` first to see what would be transferred without writing anything.
 - An **admin-forced password reset wipes that user's vault** — the admin has no
   access to the old plaintext and therefore cannot re-encrypt the entries. Users
   changing their own password keep their vault (entries are re-encrypted in place).
-- Passwords are hashed with bcrypt (cost 12). The last admin cannot be deleted or
-  demoted.
+- Passwords are hashed with bcrypt (cost 12), minimum 12 characters. The last
+  admin cannot be deleted or demoted; accounts lock after 10 failed logins and
+  only an admin can unlock them.
+- 2FA secrets are AES-256-GCM encrypted at rest with a server-wide key, separate
+  from the vault key. Recovery codes are bcrypt-hashed, single-use, shown once.
+- Every state-changing request needs a CSRF double-submit token, checked with a
+  timing-safe comparison.
 - The Content-Security-Policy blocks inline scripts.
 - No secrets belong in this repository. `.env` is gitignored; `.env.example`
-  contains placeholders only.
+  contains placeholders only. See [`docs/security.md`](docs/security.md) for the
+  full audit checklist and results.
 
 ## License
 

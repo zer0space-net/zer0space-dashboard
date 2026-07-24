@@ -10,6 +10,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const db = require('./db');
 const vaultCrypto = require('./vault-crypto');
+const totp = require('./totp');
 const createVaultRouter = require('./routes/vault');
 
 const app = express();
@@ -93,6 +94,36 @@ async function getSessionSecret() {
   return rows[0].value;
 }
 
+// ---- TOTP secret encryption key ----
+// Same priority pattern as getSessionSecret(): Docker Secret -> env var -> DB ->
+// freshly generated. This key encrypts users.totp_secret at rest (AES-256-GCM via
+// vault-crypto's generic encryptField/decryptField) so a raw DB dump alone does not
+// hand over anyone's TOTP seed. Deliberately a SERVER-wide key, not derived from the
+// user's password like the vault key: verifying a 2FA code (or an admin looking up
+// whether 2FA is on) must work without the plaintext password in hand.
+async function getTotpEncryptionKey() {
+  const fromSecret = readSecret('totp_enc_key', 'TOTP_ENC_KEY');
+  let material = fromSecret;
+  if (!material) {
+    const row = await db.one("SELECT value FROM settings WHERE key = 'totp_enc_key'");
+    if (row) material = row.value;
+  }
+  if (!material) {
+    const generated = crypto.randomBytes(32).toString('hex');
+    const { rows } = await db.query(
+      `INSERT INTO settings (key, value) VALUES ('totp_enc_key', $1)
+       ON CONFLICT (key) DO UPDATE SET value = settings.value
+       RETURNING value`,
+      [generated]
+    );
+    material = rows[0].value;
+    console.log('[dashboard] Auto-generated TOTP_ENC_KEY stored in DB (persistent across restarts).');
+  }
+  // Normalise arbitrary-length secret material (hex string, or an operator-supplied
+  // passphrase) to exactly 32 bytes for AES-256.
+  return crypto.createHash('sha256').update(material).digest();
+}
+
 // ---- Brute-force rate limiting (in-memory) ----
 
 const loginAttempts = new Map(); // key: `ip:username` → { count, windowStart, lockedUntil }
@@ -131,6 +162,69 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, v] of loginAttempts) {
     if (now > Math.max(v.lockedUntil, v.windowStart + RATE_WINDOW)) loginAttempts.delete(k);
+  }
+}, 30 * 60_000);
+
+// ---- 2FA-verify rate limiting (in-memory) ----
+// Separate from the login limiter above: this gates the TOTP-code-guessing step
+// specifically (max 5 tries / 5 min per user), independent of the IP+username
+// login limiter and the persistent DB lockout counter.
+const twoFaAttempts = new Map(); // key: userId -> { count, windowStart }
+const TWOFA_RATE_MAX    = 5;
+const TWOFA_RATE_WINDOW = 5 * 60_000;
+
+function checkTwoFaRateLimit(userId) {
+  const now = Date.now();
+  const e = twoFaAttempts.get(userId);
+  if (!e) return null;
+  if (now - e.windowStart > TWOFA_RATE_WINDOW) { twoFaAttempts.delete(userId); return null; }
+  if (e.count >= TWOFA_RATE_MAX) return { remaining: e.windowStart + TWOFA_RATE_WINDOW - now };
+  return null;
+}
+
+function recordTwoFaFailure(userId) {
+  const now = Date.now();
+  const e = twoFaAttempts.get(userId) || { count: 0, windowStart: now };
+  if (now - e.windowStart > TWOFA_RATE_WINDOW) { e.count = 0; e.windowStart = now; }
+  e.count++;
+  twoFaAttempts.set(userId, e);
+}
+
+function clearTwoFaFailures(userId) { twoFaAttempts.delete(userId); }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of twoFaAttempts) {
+    if (now - v.windowStart > TWOFA_RATE_WINDOW) twoFaAttempts.delete(k);
+  }
+}, 30 * 60_000);
+
+// ---- Registration rate limiting (in-memory, per IP — 3/hour) ----
+const registerAttempts = new Map(); // key: ip -> { count, windowStart }
+const REGISTER_RATE_MAX    = 3;
+const REGISTER_RATE_WINDOW = 60 * 60_000;
+
+function checkRegisterRateLimit(ip) {
+  const now = Date.now();
+  const e = registerAttempts.get(ip);
+  if (!e) return null;
+  if (now - e.windowStart > REGISTER_RATE_WINDOW) { registerAttempts.delete(ip); return null; }
+  if (e.count >= REGISTER_RATE_MAX) return { remaining: e.windowStart + REGISTER_RATE_WINDOW - now };
+  return null;
+}
+
+function recordRegisterAttempt(ip) {
+  const now = Date.now();
+  const e = registerAttempts.get(ip) || { count: 0, windowStart: now };
+  if (now - e.windowStart > REGISTER_RATE_WINDOW) { e.count = 0; e.windowStart = now; }
+  e.count++;
+  registerAttempts.set(ip, e);
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of registerAttempts) {
+    if (now - v.windowStart > REGISTER_RATE_WINDOW) registerAttempts.delete(k);
   }
 }, 30 * 60_000);
 
@@ -206,6 +300,48 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 // break the vault threat model. Consequence: sessions are per-process, so the
 // dashboard must stay at replicas: 1 and a restart logs everyone out.
 let sessionMiddleware = null;
+let totpEncKey = null; // set during startup() — see getTotpEncryptionKey()
+
+// ---- Recovery codes (2FA fallback) ----
+// 8 single-use codes generated once at 2FA setup, shown once, stored bcrypt-hashed
+// (never plaintext, never reversible — unlike totp_secret they don't need to be
+// decrypted, only compared against, so a one-way hash is the right tool here).
+function generateRecoveryCodes(count = 8) {
+  const codes = [];
+  for (let i = 0; i < count; i++) {
+    const raw = crypto.randomBytes(5).toString('hex').toUpperCase(); // 10 hex chars
+    codes.push(`${raw.slice(0, 5)}-${raw.slice(5)}`);
+  }
+  return codes;
+}
+
+async function storeRecoveryCodes(userId, codes) {
+  await db.tx(async (client) => {
+    await client.query('DELETE FROM recovery_codes WHERE user_id = $1', [userId]);
+    for (const code of codes) {
+      await client.query(
+        'INSERT INTO recovery_codes (user_id, code_hash) VALUES ($1, $2)',
+        [userId, bcrypt.hashSync(code, 10)]
+      );
+    }
+  });
+}
+
+// Each unused code is bcrypt-hashed with its own salt, so lookup can't be indexed —
+// there are at most 8 rows per user, so a linear compareSync scan is cheap enough.
+// The UPDATE ... WHERE used_at IS NULL makes the "mark used" step atomic (no TOCTOU
+// window where the same code could be consumed twice by parallel requests).
+async function consumeRecoveryCode(userId, code) {
+  const normalized = String(code).trim().toUpperCase();
+  const rows = await db.all('SELECT id, code_hash FROM recovery_codes WHERE user_id = $1 AND used_at IS NULL', [userId]);
+  for (const row of rows) {
+    if (bcrypt.compareSync(normalized, row.code_hash)) {
+      const r = await db.query('UPDATE recovery_codes SET used_at = NOW() WHERE id = $1 AND used_at IS NULL', [row.id]);
+      return r.rowCount > 0;
+    }
+  }
+  return false;
+}
 app.use((req, res, next) => {
   if (!sessionMiddleware) return res.status(503).json({ error: 'Server is still starting', code: 'STARTING' });
   return sessionMiddleware(req, res, next);
@@ -225,6 +361,28 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// ---- CSRF: double-submit token, session-bound ----
+// Shared by every state-changing route below (not just /api/vault, which had its own
+// copy of this before — kept here now so ALL POST/PUT/DELETE routes use one
+// definition). The token is minted once per session (see /api/login and the
+// pending-2FA session in /api/login below) and handed back via /api/me; the client
+// echoes it in the X-CSRF-Token header on every mutating request.
+// Login, register and the 2FA verify-code step are deliberately exempt: they either
+// run before any session/token exists (login, register) or would otherwise create a
+// chicken-and-egg problem (a wrong password/code must still count as a failed
+// attempt without a valid token already in hand).
+function requireCsrf(req, res, next) {
+  const sent = req.headers['x-csrf-token'];
+  const expected = req.session?.csrfToken;
+  const sentBuf = Buffer.from(String(sent || ''));
+  const expectedBuf = Buffer.from(String(expected || ''));
+  const valid = sent && expected
+    && sentBuf.length === expectedBuf.length
+    && crypto.timingSafeEqual(sentBuf, expectedBuf);
+  if (!valid) return res.status(403).json({ error: 'Invalid CSRF token', code: 'CSRF' });
+  next();
+}
+
 // ---- Public routes ----
 
 // login.js must be reachable before auth so the login page can load it.
@@ -234,6 +392,21 @@ app.get('/login', (req, res) => {
   if (req.session?.userId) return res.redirect('/');
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
+
+// Failed-login accounting shared by /api/login: bumps the persistent DB counter
+// and locks the account at 10, independent of the short-lived in-memory rate
+// limiter above. Kept generic on the response side — see requireCsrf comment for
+// why login can't reveal *why* it failed (wrong password vs. locked account both
+// come back as BAD_CREDENTIALS; only the admin user list shows the real lock state).
+async function recordDbFailure(user) {
+  await db.query(
+    `UPDATE users SET failed_logins = failed_logins + 1,
+       locked = CASE WHEN failed_logins + 1 >= 10 THEN true ELSE locked END,
+       locked_at = CASE WHEN failed_logins + 1 >= 10 AND NOT locked THEN NOW() ELSE locked_at END
+     WHERE id = $1`,
+    [user.id]
+  );
+}
 
 app.post('/api/login', ah(async (req, res) => {
   const { username, password } = req.body || {};
@@ -247,12 +420,29 @@ app.post('/api/login', ah(async (req, res) => {
   }
 
   const user = await db.one('SELECT * FROM users WHERE username = $1', [username]);
-  if (!user || !bcrypt.compareSync(password, user.hash)) {
+  // Locked accounts fail the same generic way as a wrong password — the lock state
+  // is only ever exposed to admins (user list), never to the person logging in.
+  if (!user || user.locked || !bcrypt.compareSync(password, user.hash)) {
     recordFailure(key);
+    if (user && !user.locked) await recordDbFailure(user);
     return res.status(401).json({ error: 'Wrong username or password', code: 'BAD_CREDENTIALS' });
   }
 
   clearFailures(key);
+  if (user.failed_logins > 0) await db.query('UPDATE users SET failed_logins = 0 WHERE id = $1', [user.id]);
+
+  if (user.totp_enabled) {
+    // Step 1 of 2 passed. Do NOT set req.session.userId yet — requireAuth (and
+    // therefore every /api/* route below it) keys off that field, so a pending
+    // session cannot reach anything but /api/2fa/login. The vault key is likewise
+    // not derived yet; it happens only once the full session is established below.
+    req.session.pending2faUserId = user.id;
+    req.session.pending2faPassword = password; // kept only until /api/2fa/login succeeds — needed to derive the vault key without a second password prompt
+    req.session.pending2faExpires = Date.now() + 5 * 60_000;
+    if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+    return res.status(202).json({ requires_2fa: true, csrfToken: req.session.csrfToken });
+  }
+
   req.session.userId   = user.id;
   req.session.username = user.username;
   req.session.role     = user.role || 'viewer';
@@ -267,16 +457,123 @@ app.post('/api/login', ah(async (req, res) => {
   }
   req.session.vaultKey = vaultCrypto.deriveVaultKey(password, vaultSalt).toString('base64');
 
-  // CSRF token for state-changing vault requests (double-submit pattern —
-  // see routes/vault.js). Generated once per session, returned via /api/me.
+  // CSRF token for state-changing requests (double-submit pattern). Generated
+  // once per session, returned via /api/me.
   if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(32).toString('hex');
 
   res.json({ ok: true, role: user.role });
 }));
 
-app.post('/api/logout', (req, res) => {
+// Step 2 of the 2FA login flow. Deliberately mounted BEFORE app.use(requireAuth):
+// req.session.userId is not set yet at this point, only pending2faUserId from
+// step 1, so this route (and only this route) is reachable in that state.
+app.post('/api/2fa/login', ah(async (req, res) => {
+  const pendingId = req.session.pending2faUserId;
+  if (!pendingId || Date.now() > (req.session.pending2faExpires || 0)) {
+    return res.status(401).json({ error: 'Session expired — please log in again', code: 'TWOFA_SESSION_EXPIRED' });
+  }
+
+  const rate = checkTwoFaRateLimit(pendingId);
+  if (rate) {
+    const mins = Math.ceil(rate.remaining / 60_000);
+    return res.status(429).json({ error: `Zu viele Versuche. Bitte ${mins} Minute(n) warten.` });
+  }
+
+  const { code } = req.body || {};
+  const user = await db.one('SELECT * FROM users WHERE id = $1', [pendingId]);
+  const password = req.session.pending2faPassword;
+  if (!user || !user.totp_enabled) {
+    return res.status(401).json({ error: 'Session expired — please log in again', code: 'TWOFA_SESSION_EXPIRED' });
+  }
+
+  const secret = user.totp_secret ? vaultCrypto.decryptField(user.totp_secret, totpEncKey) : null;
+  const validCode = secret && totp.verifyTotp(secret, String(code || ''), { window: 1 });
+  const validRecovery = !validCode && typeof code === 'string' && await consumeRecoveryCode(user.id, code);
+
+  if (!validCode && !validRecovery) {
+    recordTwoFaFailure(pendingId);
+    return res.status(401).json({ error: 'Invalid code', code: 'TWOFA_INVALID' });
+  }
+  clearTwoFaFailures(pendingId);
+
+  delete req.session.pending2faUserId;
+  delete req.session.pending2faPassword;
+  delete req.session.pending2faExpires;
+
+  req.session.userId   = user.id;
+  req.session.username = user.username;
+  req.session.role     = user.role || 'viewer';
+
+  let vaultSalt = user.vault_salt;
+  if (!vaultSalt) {
+    vaultSalt = vaultCrypto.newSalt();
+    await db.query('UPDATE users SET vault_salt = $1 WHERE id = $2', [vaultSalt, user.id]);
+  }
+  req.session.vaultKey = vaultCrypto.deriveVaultKey(password, vaultSalt).toString('base64');
+  if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+
+  res.json({ ok: true, role: user.role, usedRecoveryCode: validRecovery });
+}));
+
+app.post('/api/logout', requireCsrf, (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
+
+// register.html/js must be reachable before auth, same reasoning as login.js above.
+app.get('/register.js', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'register.js')));
+app.get('/register', (req, res) => {
+  if (req.session?.userId) return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'register.html'));
+});
+
+function getClientIp(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+}
+
+// Public, invite-gated self-registration. Rate-limited per IP (3/h) on top of the
+// invite code itself being single-use — the limiter mainly guards against someone
+// grinding through guesses of a not-yet-used code.
+app.post('/api/register', ah(async (req, res) => {
+  const ip = getClientIp(req);
+  const rate = checkRegisterRateLimit(ip);
+  if (rate) {
+    const mins = Math.ceil(rate.remaining / 60_000);
+    return res.status(429).json({ error: `Zu viele Versuche. Bitte ${mins} Minute(n) warten.` });
+  }
+  recordRegisterAttempt(ip);
+
+  const { inviteCode, username, password } = req.body || {};
+  if (!inviteCode || !username || !password) return res.status(400).json({ error: 'Fields missing', code: 'FIELDS_MISSING' });
+  if (!/^[a-zA-Z0-9_-]{3,32}$/.test(username)) return res.status(400).json({ error: 'Invalid username', code: 'USERNAME_INVALID' });
+  if (password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters', code: 'PW_TOO_SHORT' });
+
+  // FOR UPDATE locks the invite row for the duration of the transaction — two
+  // concurrent registrations racing on the same code can't both pass the
+  // used_at/expired/revoked check before either commits.
+  const result = await db.tx(async (client) => {
+    const { rows } = await client.query('SELECT * FROM invite_codes WHERE code = $1 FOR UPDATE', [inviteCode]);
+    const invite = rows[0];
+    if (!invite || invite.revoked || invite.used_at || new Date(invite.expires_at) < new Date()) {
+      return { error: 'invalid' };
+    }
+    const { rows: existing } = await client.query('SELECT id FROM users WHERE username = $1', [username.trim()]);
+    if (existing[0]) return { error: 'taken' };
+    const { rows: userRows } = await client.query(
+      `INSERT INTO users (username, hash, role) VALUES ($1, $2, $3) RETURNING id, username, role`,
+      [username.trim(), bcrypt.hashSync(password, 12), invite.role]
+    );
+    await client.query('UPDATE invite_codes SET used_at = NOW(), used_by = $1 WHERE id = $2', [userRows[0].id, invite.id]);
+    return { user: userRows[0] };
+  });
+
+  // Invalid, expired, revoked AND already-used codes all get the exact same generic
+  // message — never reveal which, so a guesser can't distinguish "wrong" from
+  // "right but already spent".
+  if (result.error === 'invalid') return res.status(400).json({ error: 'Invalid or expired invite code', code: 'INVITE_INVALID' });
+  if (result.error === 'taken')   return res.status(409).json({ error: 'Username already taken', code: 'USERNAME_TAKEN' });
+
+  res.status(201).json({ ok: true, username: result.user.username });
+}));
 
 // ---- Protected zone ----
 
@@ -289,20 +586,21 @@ app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.h
 // ---- Any authenticated user ----
 
 app.get('/api/me', ah(async (req, res) => {
-  const user = await db.one('SELECT username, role, theme FROM users WHERE id = $1', [req.session.userId]);
+  const user = await db.one('SELECT username, role, theme, totp_enabled FROM users WHERE id = $1', [req.session.userId]);
   res.json({
     username:  user?.username || req.session.username,
     role:      user?.role     || req.session.role || 'viewer',
     theme:     user?.theme    || null,
     csrfToken: req.session.csrfToken || null,
     vaultUnlocked: Boolean(req.session.vaultKey),
+    totpEnabled: Boolean(user?.totp_enabled),
   });
 }));
 
-app.post('/api/change-password', ah(async (req, res) => {
+app.post('/api/change-password', requireCsrf, ah(async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Fields missing', code: 'FIELDS_MISSING' });
-  if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters', code: 'PW_TOO_SHORT' });
+  if (newPassword.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters', code: 'PW_TOO_SHORT' });
   const user = await db.one('SELECT * FROM users WHERE id = $1', [req.session.userId]);
   if (!user || !bcrypt.compareSync(currentPassword, user.hash))
     return res.status(401).json({ error: 'Current password is wrong', code: 'PW_CURRENT_WRONG' });
@@ -345,8 +643,91 @@ app.post('/api/change-password', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---- 2FA (TOTP) — setup / verify / disable ----
+// All three require a full session (mounted after requireAuth) and the current
+// password, on top of the session already being authenticated — enabling or
+// disabling a second factor is sensitive enough to re-confirm identity even when
+// a valid session cookie is presented (covers a hijacked-but-unlocked browser tab).
+
+app.post('/api/2fa/setup', requireCsrf, ah(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: 'Current password required', code: 'PW_REQUIRED' });
+  const user = await db.one('SELECT * FROM users WHERE id = $1', [req.session.userId]);
+  if (!user || !bcrypt.compareSync(password, user.hash))
+    return res.status(401).json({ error: 'Current password is wrong', code: 'PW_CURRENT_WRONG' });
+  if (user.totp_enabled) return res.status(409).json({ error: '2FA is already enabled', code: 'TWOFA_ALREADY_ENABLED' });
+
+  // The secret is held in the SESSION only until /api/2fa/verify confirms the user
+  // actually scanned it and can produce a valid code — it is NOT written to the DB
+  // yet, so an abandoned setup leaves no trace and can just be started over.
+  const secret = totp.generateSecret();
+  req.session.pendingTotpSecret = secret;
+  res.json({ secret, otpauthUrl: totp.buildOtpauthUri({ secret, username: user.username }) });
+}));
+
+app.post('/api/2fa/verify', requireCsrf, ah(async (req, res) => {
+  const { code } = req.body || {};
+  const secret = req.session.pendingTotpSecret;
+  if (!secret) return res.status(409).json({ error: 'No 2FA setup in progress', code: 'TWOFA_NO_SETUP' });
+
+  const rate = checkTwoFaRateLimit(req.session.userId);
+  if (rate) {
+    const mins = Math.ceil(rate.remaining / 60_000);
+    return res.status(429).json({ error: `Zu viele Versuche. Bitte ${mins} Minute(n) warten.` });
+  }
+
+  if (!totp.verifyTotp(secret, String(code || ''), { window: 1 })) {
+    recordTwoFaFailure(req.session.userId);
+    return res.status(401).json({ error: 'Invalid code', code: 'TWOFA_INVALID' });
+  }
+  clearTwoFaFailures(req.session.userId);
+
+  const recoveryCodes = generateRecoveryCodes(8);
+  await db.tx(async (client) => {
+    await client.query(
+      'UPDATE users SET totp_secret = $1, totp_enabled = true WHERE id = $2',
+      [vaultCrypto.encryptField(secret, totpEncKey), req.session.userId]
+    );
+  });
+  await storeRecoveryCodes(req.session.userId, recoveryCodes);
+  delete req.session.pendingTotpSecret;
+
+  // recoveryCodes are returned exactly once, in this response — there is no route
+  // that can ever retrieve them again (only bcrypt hashes are stored).
+  res.json({ ok: true, recoveryCodes });
+}));
+
+app.post('/api/2fa/disable', requireCsrf, ah(async (req, res) => {
+  const { password, code } = req.body || {};
+  if (!password || !code) return res.status(400).json({ error: 'Password and code required', code: 'FIELDS_MISSING' });
+
+  const user = await db.one('SELECT * FROM users WHERE id = $1', [req.session.userId]);
+  if (!user || !bcrypt.compareSync(password, user.hash))
+    return res.status(401).json({ error: 'Current password is wrong', code: 'PW_CURRENT_WRONG' });
+  if (!user.totp_enabled) return res.status(409).json({ error: '2FA is not enabled', code: 'TWOFA_NOT_ENABLED' });
+
+  const rate = checkTwoFaRateLimit(req.session.userId);
+  if (rate) {
+    const mins = Math.ceil(rate.remaining / 60_000);
+    return res.status(429).json({ error: `Zu viele Versuche. Bitte ${mins} Minute(n) warten.` });
+  }
+
+  const secret = vaultCrypto.decryptField(user.totp_secret, totpEncKey);
+  if (!secret || !totp.verifyTotp(secret, String(code), { window: 1 })) {
+    recordTwoFaFailure(req.session.userId);
+    return res.status(401).json({ error: 'Invalid code', code: 'TWOFA_INVALID' });
+  }
+  clearTwoFaFailures(req.session.userId);
+
+  await db.tx(async (client) => {
+    await client.query('UPDATE users SET totp_secret = NULL, totp_enabled = false WHERE id = $1', [req.session.userId]);
+    await client.query('DELETE FROM recovery_codes WHERE user_id = $1', [req.session.userId]);
+  });
+  res.json({ ok: true });
+}));
+
 // Save own theme preference (any authenticated user)
-app.put('/api/user/theme', ah(async (req, res) => {
+app.put('/api/user/theme', requireCsrf, ah(async (req, res) => {
   const { theme } = req.body || {};
   if (!theme) return res.status(400).json({ error: 'Theme required', code: 'THEME_REQUIRED' });
   await db.query('UPDATE users SET theme = $1 WHERE id = $2', [theme, req.session.userId]);
@@ -397,7 +778,7 @@ app.get('/api/status', async (_req, res) => {
 
 // ---- Admin-only routes ----
 
-app.put('/api/settings', requireAdmin, ah(async (req, res) => {
+app.put('/api/settings', requireAdmin, requireCsrf, ah(async (req, res) => {
   const { key, value } = req.body || {};
   if (!key || value === undefined) return res.status(400).json({ error: 'Key and value required', code: 'KEY_VALUE_REQUIRED' });
   await db.query(
@@ -417,7 +798,7 @@ function validateServiceInput({ name, description, url, icon }) {
   return null;
 }
 
-app.post('/api/services', requireAdmin, ah(async (req, res) => {
+app.post('/api/services', requireAdmin, requireCsrf, ah(async (req, res) => {
   const { name, description = '', url = '', icon = 'layout-dashboard', status = 'unknown' } = req.body ?? {};
   const err = validateServiceInput({ name, description, url, icon });
   if (err) return res.status(400).json({ error: err });
@@ -430,7 +811,7 @@ app.post('/api/services', requireAdmin, ah(async (req, res) => {
   res.status(201).json(row);
 }));
 
-app.put('/api/services/:id', requireAdmin, ah(async (req, res) => {
+app.put('/api/services/:id', requireAdmin, requireCsrf, ah(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
   const { name, description = '', url = '', icon = 'layout-dashboard', status = 'unknown' } = req.body ?? {};
@@ -445,14 +826,14 @@ app.put('/api/services/:id', requireAdmin, ah(async (req, res) => {
   res.json(row);
 }));
 
-app.delete('/api/services/:id', requireAdmin, ah(async (req, res) => {
+app.delete('/api/services/:id', requireAdmin, requireCsrf, ah(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
   await db.query('DELETE FROM services WHERE id = $1', [id]);
   res.sendStatus(204);
 }));
 
-app.post('/api/background', requireAdmin, bgUpload.single('image'), ah(async (req, res) => {
+app.post('/api/background', requireAdmin, requireCsrf, bgUpload.single('image'), ah(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file or invalid type (JPG/PNG/WebP)', code: 'BAD_UPLOAD' });
   const extMap = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
   const ext  = extMap[req.file.mimetype] || 'jpg';
@@ -477,7 +858,7 @@ app.post('/api/background', requireAdmin, bgUpload.single('image'), ah(async (re
   res.json({ ok: true });
 }));
 
-app.delete('/api/background', requireAdmin, ah(async (_req, res) => {
+app.delete('/api/background', requireAdmin, requireCsrf, ah(async (_req, res) => {
   const row = await db.one("SELECT value FROM settings WHERE key = 'bg_file'");
   if (row) {
     const file = path.join(BG_DIR, path.basename(row.value));
@@ -490,13 +871,13 @@ app.delete('/api/background', requireAdmin, ah(async (_req, res) => {
 // User management (admin only)
 
 app.get('/api/users', requireAdmin, ah(async (_req, res) => {
-  res.json(await db.all('SELECT id, username, role FROM users ORDER BY id'));
+  res.json(await db.all('SELECT id, username, role, totp_enabled, locked FROM users ORDER BY id'));
 }));
 
-app.post('/api/users', requireAdmin, ah(async (req, res) => {
+app.post('/api/users', requireAdmin, requireCsrf, ah(async (req, res) => {
   const { username, password, role } = req.body || {};
   if (!username?.trim() || !password) return res.status(400).json({ error: 'Fields missing', code: 'FIELDS_MISSING' });
-  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters', code: 'PW_TOO_SHORT' });
+  if (password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters', code: 'PW_TOO_SHORT' });
   if (!['admin', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role', code: 'INVALID_ROLE' });
   // ON CONFLICT instead of a SELECT-then-INSERT: the UNIQUE index decides, so two
   // concurrent requests for the same name can't both get past a pre-check.
@@ -510,11 +891,11 @@ app.post('/api/users', requireAdmin, ah(async (req, res) => {
   res.status(201).json(row);
 }));
 
-app.put('/api/users/:id/password', requireAdmin, ah(async (req, res) => {
+app.put('/api/users/:id/password', requireAdmin, requireCsrf, ah(async (req, res) => {
   const id = Number(req.params.id);
   const { password } = req.body || {};
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
-  if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters', code: 'PW_TOO_SHORT' });
+  if (!password || password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters', code: 'PW_TOO_SHORT' });
 
   // Admin-forced reset: the admin never has the target user's OLD plaintext
   // password, so their vault key can't be re-derived and the existing vault
@@ -525,7 +906,7 @@ app.put('/api/users/:id/password', requireAdmin, ah(async (req, res) => {
     if (!rows[0]) return false;
     await client.query('DELETE FROM vault_entries WHERE user_id = $1', [id]);
     await client.query(
-      'UPDATE users SET hash = $1, vault_salt = $2 WHERE id = $3',
+      'UPDATE users SET hash = $1, vault_salt = $2, failed_logins = 0, locked = false, locked_at = NULL WHERE id = $3',
       [bcrypt.hashSync(password, 12), vaultCrypto.newSalt(), id]
     );
     return true;
@@ -534,7 +915,39 @@ app.put('/api/users/:id/password', requireAdmin, ah(async (req, res) => {
   res.json({ ok: true, vaultWiped: true });
 }));
 
-app.put('/api/users/:id/role', requireAdmin, ah(async (req, res) => {
+// Admin unlock: clears the persistent lockout counter set by recordDbFailure()
+// after 10 failed attempts. This is the ONLY way a locked account becomes usable
+// again — there is no self-service or time-based auto-unlock by design.
+app.put('/api/users/:id/unlock', requireAdmin, requireCsrf, ah(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
+  const row = await db.one(
+    'UPDATE users SET locked = false, locked_at = NULL, failed_logins = 0 WHERE id = $1 RETURNING id',
+    [id]
+  );
+  if (!row) return res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
+  res.json({ ok: true });
+}));
+
+// Admin 2FA reset: for when the user loses their authenticator device. Drops the
+// encrypted secret and every recovery code — the user re-enrolls from scratch via
+// /api/2fa/setup on their next login (2FA is optional per-user, so this does not
+// re-lock them out of the account, just turns TOTP back off for them).
+app.put('/api/users/:id/reset-2fa', requireAdmin, requireCsrf, ah(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
+  const updated = await db.tx(async (client) => {
+    const { rows } = await client.query('SELECT id FROM users WHERE id = $1', [id]);
+    if (!rows[0]) return false;
+    await client.query('UPDATE users SET totp_secret = NULL, totp_enabled = false WHERE id = $1', [id]);
+    await client.query('DELETE FROM recovery_codes WHERE user_id = $1', [id]);
+    return true;
+  });
+  if (!updated) return res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
+  res.json({ ok: true });
+}));
+
+app.put('/api/users/:id/role', requireAdmin, requireCsrf, ah(async (req, res) => {
   const id = Number(req.params.id);
   const { role } = req.body || {};
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
@@ -557,7 +970,7 @@ app.put('/api/users/:id/role', requireAdmin, ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.delete('/api/users/:id', requireAdmin, ah(async (req, res) => {
+app.delete('/api/users/:id', requireAdmin, requireCsrf, ah(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
   if (id === req.session.userId)
@@ -570,13 +983,60 @@ app.delete('/api/users/:id', requireAdmin, ah(async (req, res) => {
       const { rows: cnt } = await client.query("SELECT COUNT(*)::int AS c FROM users WHERE role = 'admin'");
       if (cnt[0].c <= 1) return 'lastadmin';
     }
-    // Explicit cleanup before the user row goes (vault_entries references users).
+    // Explicit cleanup before the user row goes — vault_entries/recovery_codes
+    // reference users(id) with no ON DELETE CASCADE, and invite_codes.created_by/
+    // used_by would otherwise block the delete outright (kept as NULL instead of
+    // deleting invite history, so revoked/used invites stay auditable).
     await client.query('DELETE FROM vault_entries WHERE user_id = $1', [id]);
+    await client.query('DELETE FROM recovery_codes WHERE user_id = $1', [id]);
+    await client.query('UPDATE invite_codes SET created_by = NULL WHERE created_by = $1', [id]);
+    await client.query('UPDATE invite_codes SET used_by = NULL WHERE used_by = $1', [id]);
     await client.query('DELETE FROM users WHERE id = $1', [id]);
     return 'ok';
   });
   if (result === 'notfound')  return res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
   if (result === 'lastadmin') return res.status(400).json({ error: 'The last admin cannot be deleted', code: 'LAST_ADMIN_DELETE' });
+  res.json({ ok: true });
+}));
+
+// ---- Invite codes (admin only) ----
+// Self-registration is invite-gated: an admin mints a code, hands it to the new
+// user out-of-band (chat, in person), and /api/register (public, above) consumes it.
+
+app.get('/api/invites', requireAdmin, ah(async (_req, res) => {
+  res.json(await db.all(
+    `SELECT i.id, i.code, i.role, i.created_at, i.expires_at, i.used_at, i.revoked,
+            creator.username AS created_by_username, used.username AS used_by_username
+     FROM invite_codes i
+     LEFT JOIN users creator ON creator.id = i.created_by
+     LEFT JOIN users used    ON used.id    = i.used_by
+     ORDER BY i.created_at DESC`
+  ));
+}));
+
+app.post('/api/invites', requireAdmin, requireCsrf, ah(async (req, res) => {
+  const { role = 'viewer', expiresInHours = 72 } = req.body || {};
+  if (!['admin', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role', code: 'INVALID_ROLE' });
+  const hours = Number(expiresInHours);
+  if (!Number.isFinite(hours) || hours < 1 || hours > 24 * 30) {
+    return res.status(400).json({ error: 'expiresInHours must be between 1 and 720', code: 'INVALID_EXPIRY' });
+  }
+  // 32+ hex chars of CSPRNG output, per the same bar as the session/CSRF tokens above.
+  const code = crypto.randomBytes(24).toString('hex'); // 48 hex chars = 192 bits
+  const row = await db.one(
+    `INSERT INTO invite_codes (code, role, created_by, expires_at)
+     VALUES ($1, $2, $3, NOW() + ($4 || ' hours')::interval)
+     RETURNING id, code, role, created_at, expires_at`,
+    [code, role, req.session.userId, hours]
+  );
+  res.status(201).json(row);
+}));
+
+app.delete('/api/invites/:id', requireAdmin, requireCsrf, ah(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
+  const r = await db.query('UPDATE invite_codes SET revoked = true WHERE id = $1 AND used_at IS NULL', [id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: 'Invite not found or already used', code: 'INVITE_NOT_FOUND' });
   res.json({ ok: true });
 }));
 
@@ -803,15 +1263,22 @@ async function startup() {
     db.retryInBackground();
   }
 
+  // Loaded after the DB/schema/session-secret steps above so it can fall back to
+  // an ephemeral key the same way getSessionSecret() does if Postgres never came up.
+  totpEncKey = connected ? await getTotpEncryptionKey() : crypto.randomBytes(32);
+
   sessionMiddleware = session({
     secret,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: 'lax',
+      // 'strict' — this is a private single-page dashboard with no cross-site login
+      // flow (no OAuth redirect back, no external POST target), so there is no
+      // legitimate case that needs the cookie sent on a cross-site navigation.
+      sameSite: 'strict',
       secure: process.env.COOKIE_SECURE === 'true',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 24 * 60 * 60 * 1000,
     },
   });
 

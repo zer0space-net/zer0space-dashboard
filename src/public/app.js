@@ -20,8 +20,21 @@ const THEME_MIGRATION = { amber: 'bernstein', green: 'gruen' };
 let currentTheme = 'cyan';
 let userRole     = 'viewer'; // set in init()
 let selfUsername = '';       // set in init()
-let csrfToken     = '';       // set in init(), required on vault POST/PUT/DELETE
+let csrfToken     = '';       // set in init(), required on every POST/PUT/DELETE
 let vaultUnlocked = false;    // set in init(); false = session predates the vault key or a password was reset
+
+// Attaches the CSRF double-submit token (from /api/me at login) to every
+// state-changing request — the server requires it on ALL POST/PUT/DELETE
+// /api/ routes now, not just /api/vault/*. GET is exempt.
+function apiFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  // FormData (background image upload) sets its own multipart Content-Type
+  // with the boundary — a default JSON one here would break the upload.
+  const isFormData = options.body instanceof FormData;
+  const headers = { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
+  if (method !== 'GET') headers['X-CSRF-Token'] = csrfToken;
+  return fetch(url, { ...options, headers });
+}
 
 function hexToRgba(hex, alpha) {
   const h = hex.replace('#', '');
@@ -63,14 +76,14 @@ async function saveTheme(nameOrHex) {
   setTimeout(() => document.documentElement.style.setProperty('--t', '0.2s'), 450);
   const resolved = resolveTheme(nameOrHex);
   // All users save own preference
-  await fetch('/api/user/theme', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+  await apiFetch('/api/user/theme', {
+    method: 'PUT',
     body: JSON.stringify({ theme: resolved }),
   }).catch(() => {});
   // Admins also update global default (for users without a personal preference)
   if (userRole === 'admin') {
-    await fetch('/api/settings', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    await apiFetch('/api/settings', {
+      method: 'PUT',
       body: JSON.stringify({ key: 'theme', value: resolved }),
     }).catch(() => {});
   }
@@ -202,8 +215,8 @@ function applyBgMode(mode, skipSave) {
   const uploadSection = document.getElementById('bgUploadSection');
   if (uploadSection) uploadSection.classList.toggle('visible', isImage);
   if (!skipSave) {
-    fetch('/api/settings', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    apiFetch('/api/settings', {
+      method: 'PUT',
       body: JSON.stringify({ key: 'bg_mode', value: mode }),
     }).catch(() => {});
   }
@@ -235,7 +248,7 @@ async function uploadBackground(file) {
   }
   if (file.size > 10*1024*1024) { showBgMsg(t('bg.maxSize'), 'error'); return; }
   const form = new FormData(); form.append('image', file);
-  const res = await fetch('/api/background', { method: 'POST', body: form });
+  const res = await apiFetch('/api/background', { method: 'POST', body: form });
   if (!res.ok) { const d=await res.json().catch(()=>({})); showBgMsg(I18N.tError(d,'bg.uploadFailed'),'error'); return; }
   bgPreviewImg.src = URL.createObjectURL(file);
   bgDropZone.style.display = 'none'; bgPreview.classList.add('visible');
@@ -245,7 +258,7 @@ async function uploadBackground(file) {
 }
 
 document.getElementById('bgRemoveBtn').addEventListener('click', async () => {
-  await fetch('/api/background', { method: 'DELETE' }).catch(() => {});
+  await apiFetch('/api/background', { method: 'DELETE' }).catch(() => {});
   bgImage.style.backgroundImage = '';
   bgPreview.classList.remove('visible'); bgDropZone.style.display = '';
   applyBgMode('generativ'); showBgMsg(t('bg.removed'), 'ok');
@@ -279,7 +292,7 @@ function switchView(name) {
     el.classList.toggle('active', el.dataset.view === name);
   });
   if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open');
-  if (name === 'einstellungen' && userRole === 'admin') loadUsers();
+  if (name === 'einstellungen' && userRole === 'admin') { loadUsers(); loadInvites(); }
   if (name === 'vault') loadVault();
   // Decrypted vault values shouldn't sit in JS/DOM memory longer than the
   // user is actually looking at the Vault view.
@@ -524,7 +537,7 @@ function buildCard(s) {
   el.querySelector('.card-delete').addEventListener('click', async e=>{
     e.stopPropagation();
     if(!confirm(t('common.confirmRemove', { name: s.name }))) return;
-    await fetch(`/api/services/${s.id}`,{method:'DELETE'}); loadServices();
+    await apiFetch(`/api/services/${s.id}`,{method:'DELETE'}); loadServices();
   });
   return el;
 }
@@ -602,7 +615,7 @@ addServiceForm.addEventListener('submit', async e=>{
   if (!body.name?.trim()) return;
   const url    = editingServiceId ? `/api/services/${editingServiceId}` : '/api/services';
   const method = editingServiceId ? 'PUT' : 'POST';
-  await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  await apiFetch(url,{method,body:JSON.stringify(body)});
   closeModal(); loadServices();
 });
 
@@ -617,15 +630,114 @@ document.getElementById('changePasswordForm').addEventListener('submit', async e
   const btn=document.getElementById('cpSubmitBtn'), msg=document.getElementById('cpMsg');
   msg.textContent=''; msg.className='settings-msg';
   if(newPassword!==confirmPassword){msg.textContent=t('settings.pwMismatch');msg.className='settings-msg error';return;}
-  if(newPassword.length<8){msg.textContent=t('users.pwMin8');msg.className='settings-msg error';return;}
+  if(newPassword.length<12){msg.textContent=t('users.pwMin12');msg.className='settings-msg error';return;}
   btn.disabled=true; btn.textContent='…';
   try {
-    const res=await fetch('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword,newPassword})});
+    const res=await apiFetch('/api/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword})});
     const data=await res.json().catch(()=>({}));
     if(res.ok){msg.textContent=t('settings.pwChanged');msg.className='settings-msg ok';form.reset();}
     else{msg.textContent=I18N.tError(data);msg.className='settings-msg error';}
   } catch { msg.textContent=t('common.serverUnreachable'); msg.className='settings-msg error'; }
   btn.disabled=false; btn.textContent=t('settings.savePassword');
+});
+
+// ================================================================
+// Two-Factor Authentication (TOTP)
+// ================================================================
+
+let totpEnabled = false; // set in init() from /api/me
+
+function renderTwofaState() {
+  document.getElementById('twofaStatusOff').style.display = totpEnabled ? 'none' : '';
+  document.getElementById('twofaStatusOn').style.display  = totpEnabled ? '' : 'none';
+}
+
+function resetTwofaSetupUi() {
+  document.getElementById('twofaPasswordForm').style.display = 'none';
+  document.getElementById('twofaSetupArea').style.display = 'none';
+  document.getElementById('twofaRecoveryArea').style.display = 'none';
+  document.getElementById('twofaDisableForm').style.display = 'none';
+  document.getElementById('tf-password').value = '';
+  document.getElementById('tf-code').value = '';
+  document.getElementById('tf-disable-password').value = '';
+  document.getElementById('tf-disable-code').value = '';
+}
+
+document.getElementById('twofaEnableBtn').addEventListener('click', () => {
+  resetTwofaSetupUi();
+  document.getElementById('twofaPasswordForm').style.display = '';
+  document.getElementById('tf-password').focus();
+});
+document.getElementById('twofaPasswordCancel').addEventListener('click', resetTwofaSetupUi);
+
+document.getElementById('twofaPasswordForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const password = document.getElementById('tf-password').value;
+  const btn = document.getElementById('twofaPasswordBtn'), msg = document.getElementById('twofaPasswordMsg');
+  msg.textContent=''; msg.className='settings-msg';
+  if (!password) return;
+  btn.disabled = true;
+  const res = await apiFetch('/api/2fa/setup', { method: 'POST', body: JSON.stringify({ password }) });
+  const data = await res.json().catch(() => ({}));
+  btn.disabled = false;
+  if (!res.ok) { msg.textContent = I18N.tError(data); msg.className = 'settings-msg error'; return; }
+
+  document.getElementById('twofaPasswordForm').style.display = 'none';
+  document.getElementById('twofaSetupArea').style.display = '';
+  document.getElementById('twofaSecretText').textContent = data.secret;
+  const qr = qrcode(0, 'M');
+  qr.addData(data.otpauthUrl);
+  qr.make();
+  document.getElementById('twofaQr').innerHTML = qr.createSvgTag(5, 0);
+  document.getElementById('tf-code').focus();
+});
+
+document.getElementById('twofaVerifyForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const code = document.getElementById('tf-code').value.trim();
+  const btn = document.getElementById('twofaVerifyBtn'), msg = document.getElementById('twofaVerifyMsg');
+  msg.textContent=''; msg.className='settings-msg';
+  if (!/^\d{6}$/.test(code)) { msg.textContent = t('twofa.codeInvalid'); msg.className = 'settings-msg error'; return; }
+  btn.disabled = true;
+  const res = await apiFetch('/api/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+  const data = await res.json().catch(() => ({}));
+  btn.disabled = false;
+  if (!res.ok) { msg.textContent = I18N.tError(data); msg.className = 'settings-msg error'; return; }
+
+  document.getElementById('twofaSetupArea').style.display = 'none';
+  document.getElementById('twofaRecoveryArea').style.display = '';
+  document.getElementById('twofaRecoveryCodes').innerHTML =
+    data.recoveryCodes.map(c => esc(c)).join('<br>');
+  totpEnabled = true;
+});
+
+document.getElementById('twofaRecoveryDoneBtn').addEventListener('click', () => {
+  resetTwofaSetupUi();
+  renderTwofaState();
+});
+
+document.getElementById('twofaDisableBtn').addEventListener('click', () => {
+  resetTwofaSetupUi();
+  document.getElementById('twofaDisableForm').style.display = '';
+  document.getElementById('tf-disable-password').focus();
+});
+document.getElementById('twofaDisableCancel').addEventListener('click', resetTwofaSetupUi);
+
+document.getElementById('twofaDisableForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const password = document.getElementById('tf-disable-password').value;
+  const code = document.getElementById('tf-disable-code').value.trim();
+  const btn = document.getElementById('twofaDisableSubmitBtn'), msg = document.getElementById('twofaDisableMsg');
+  msg.textContent=''; msg.className='settings-msg';
+  if (!password || !/^\d{6}$/.test(code)) { msg.textContent = t('twofa.codeInvalid'); msg.className = 'settings-msg error'; return; }
+  btn.disabled = true;
+  const res = await apiFetch('/api/2fa/disable', { method: 'POST', body: JSON.stringify({ password, code }) });
+  const data = await res.json().catch(() => ({}));
+  btn.disabled = false;
+  if (!res.ok) { msg.textContent = I18N.tError(data); msg.className = 'settings-msg error'; return; }
+  totpEnabled = false;
+  resetTwofaSetupUi();
+  renderTwofaState();
 });
 
 // ================================================================
@@ -646,9 +758,13 @@ function buildUserRow(u) {
   row.innerHTML=`
     <span class="user-row-name">${esc(u.username)}${isSelf?`<span class="you-badge">${esc(t('users.you'))}</span>`:''}</span>
     <span class="role-badge ${u.role}">${u.role}</span>
+    <span class="twofa-badge ${u.totp_enabled?'on':'off'}">${u.totp_enabled?esc(t('users.twofaOn')):esc(t('users.twofaOff'))}</span>
+    ${u.locked?`<span class="locked-badge">${esc(t('users.locked'))}</span>`:''}
     <div class="user-row-actions">
       <button class="btn-sm btn-sm-accent" data-id="${u.id}" data-action="toggle-reset">${esc(t('users.resetPassword'))}</button>
       <button class="btn-sm" data-id="${u.id}" data-action="toggle-role">${u.role==='admin'?'→ Viewer':'→ Admin'}</button>
+      ${u.totp_enabled?`<button class="btn-sm" data-id="${u.id}" data-action="reset-2fa">${esc(t('users.reset2fa'))}</button>`:''}
+      ${u.locked?`<button class="btn-sm btn-sm-accent" data-id="${u.id}" data-action="unlock-user">${esc(t('users.unlock'))}</button>`:''}
       <button class="btn-sm btn-sm-danger" data-id="${u.id}" data-action="delete-user"${isSelf?` disabled title="${esc(t('users.cannotDeleteSelf'))}"`:''}>${esc(t('common.delete'))}</button>
     </div>
     <div class="user-reset-form" id="reset-form-${u.id}" style="display:none">
@@ -674,9 +790,9 @@ document.getElementById('userList').addEventListener('click', async e=>{
   if (action==='confirm-reset') {
     const f=document.getElementById(`reset-form-${id}`);
     const pw=f.querySelector('.reset-pw-input').value;
-    if(!pw||pw.length<8){alert(t('users.pwMin8'));return;}
+    if(!pw||pw.length<12){alert(t('users.pwMin12'));return;}
     btn.disabled=true;
-    const res=await fetch(`/api/users/${id}/password`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+    const res=await apiFetch(`/api/users/${id}/password`,{method:'PUT',body:JSON.stringify({password:pw})});
     btn.disabled=false;
     if(res.ok){f.style.display='none';f.querySelector('.reset-pw-input').value='';}
     else{const d=await res.json().catch(()=>({}));alert(I18N.tError(d));}
@@ -686,7 +802,22 @@ document.getElementById('userList').addEventListener('click', async e=>{
     const newRole=badge.textContent==='admin'?'viewer':'admin';
     if(!confirm(t('users.confirmRole', { role: newRole }))) return;
     btn.disabled=true;
-    const res=await fetch(`/api/users/${id}/role`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:newRole})});
+    const res=await apiFetch(`/api/users/${id}/role`,{method:'PUT',body:JSON.stringify({role:newRole})});
+    btn.disabled=false;
+    if(res.ok) loadUsers();
+    else{const d=await res.json().catch(()=>({}));alert(I18N.tError(d));}
+  }
+  if (action==='reset-2fa') {
+    if(!confirm(t('users.confirmReset2fa'))) return;
+    btn.disabled=true;
+    const res=await apiFetch(`/api/users/${id}/reset-2fa`,{method:'PUT'});
+    btn.disabled=false;
+    if(res.ok) loadUsers();
+    else{const d=await res.json().catch(()=>({}));alert(I18N.tError(d));}
+  }
+  if (action==='unlock-user') {
+    btn.disabled=true;
+    const res=await apiFetch(`/api/users/${id}/unlock`,{method:'PUT'});
     btn.disabled=false;
     if(res.ok) loadUsers();
     else{const d=await res.json().catch(()=>({}));alert(I18N.tError(d));}
@@ -694,7 +825,7 @@ document.getElementById('userList').addEventListener('click', async e=>{
   if (action==='delete-user') {
     if(!confirm(t('users.confirmDelete'))) return;
     btn.disabled=true;
-    const res=await fetch(`/api/users/${id}`,{method:'DELETE'});
+    const res=await apiFetch(`/api/users/${id}`,{method:'DELETE'});
     btn.disabled=false;
     if(res.ok) loadUsers();
     else{const d=await res.json().catch(()=>({}));alert(I18N.tError(d));}
@@ -707,13 +838,80 @@ document.getElementById('addUserForm').addEventListener('submit', async e=>{
   const btn=document.getElementById('addUserBtn'), msg=document.getElementById('addUserMsg');
   msg.textContent=''; msg.className='settings-msg';
   if(!body.username?.trim()){msg.textContent=t('users.usernameMissing');msg.className='settings-msg error';return;}
-  if(!body.password||body.password.length<8){msg.textContent=t('users.pwMin8');msg.className='settings-msg error';return;}
+  if(!body.password||body.password.length<12){msg.textContent=t('users.pwMin12');msg.className='settings-msg error';return;}
   btn.disabled=true;
-  const res=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:body.username.trim(),password:body.password,role:body.role})});
+  const res=await apiFetch('/api/users',{method:'POST',body:JSON.stringify({username:body.username.trim(),password:body.password,role:body.role})});
   const data=await res.json().catch(()=>({}));
   if(res.ok){msg.textContent=t('users.created', { name: body.username.trim() });msg.className='settings-msg ok';form.reset();loadUsers();}
   else{msg.textContent=I18N.tError(data);msg.className='settings-msg error';}
   btn.disabled=false;
+});
+
+// ================================================================
+// Invite codes (admin only)
+// ================================================================
+
+async function loadInvites() {
+  const invites = await fetch('/api/invites').then(r=>r.json()).catch(()=>[]);
+  const list = document.getElementById('inviteList');
+  list.innerHTML = '';
+  invites.forEach(i => list.appendChild(buildInviteRow(i)));
+}
+
+function inviteStatus(i) {
+  if (i.revoked) return { key: 'revoked', text: t('invites.revoked') };
+  if (i.used_at) return { key: 'used', text: t('invites.usedBy', { name: i.used_by_username || '?' }) };
+  if (new Date(i.expires_at) < new Date()) return { key: 'expired', text: t('invites.expired') };
+  return { key: 'active', text: t('invites.active') };
+}
+
+function buildInviteRow(i) {
+  const row = document.createElement('div');
+  row.className = 'user-row';
+  const status = inviteStatus(i);
+  row.innerHTML = `
+    <span class="user-row-name" style="font-family:monospace">${esc(i.code)}</span>
+    <span class="role-badge ${i.role}">${esc(i.role)}</span>
+    <span class="invite-status-badge ${status.key}">${esc(status.text)}</span>
+    <div class="user-row-actions">
+      <button class="btn-sm" data-code="${esc(i.code)}" data-action="copy-invite">${esc(t('invites.copy'))}</button>
+      ${status.key==='active'?`<button class="btn-sm btn-sm-danger" data-id="${i.id}" data-action="revoke-invite">${esc(t('invites.revoke'))}</button>`:''}
+    </div>`;
+  return row;
+}
+
+document.getElementById('inviteList').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-action]'); if (!btn) return;
+  if (btn.dataset.action === 'copy-invite') {
+    navigator.clipboard?.writeText(btn.dataset.code).catch(() => {});
+    const original = btn.textContent;
+    btn.textContent = t('invites.copied');
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  }
+  if (btn.dataset.action === 'revoke-invite') {
+    if (!confirm(t('invites.confirmRevoke'))) return;
+    btn.disabled = true;
+    const res = await apiFetch(`/api/invites/${btn.dataset.id}`, { method: 'DELETE' });
+    btn.disabled = false;
+    if (res.ok) loadInvites();
+    else { const d = await res.json().catch(() => ({})); alert(I18N.tError(d)); }
+  }
+});
+
+document.getElementById('createInviteForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target, body = Object.fromEntries(new FormData(form));
+  const btn = document.getElementById('createInviteBtn'), msg = document.getElementById('createInviteMsg');
+  msg.textContent=''; msg.className='settings-msg';
+  btn.disabled = true;
+  const res = await apiFetch('/api/invites', {
+    method: 'POST',
+    body: JSON.stringify({ role: body.role, expiresInHours: Number(body.expiresInHours) || 72 }),
+  });
+  const data = await res.json().catch(() => ({}));
+  btn.disabled = false;
+  if (res.ok) { msg.textContent = t('invites.created'); msg.className = 'settings-msg ok'; loadInvites(); }
+  else { msg.textContent = I18N.tError(data); msg.className = 'settings-msg error'; }
 });
 
 // ================================================================
@@ -723,14 +921,9 @@ document.getElementById('addUserForm').addEventListener('submit', async e=>{
 let vaultEntries  = [];
 let vaultEditingId = null;
 
-// Attaches the CSRF token (from /api/me at login) to state-changing
-// requests. GET is exempt — CSRF only matters for writes.
-function vaultFetch(url, options = {}) {
-  const method  = (options.method || 'GET').toUpperCase();
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (method !== 'GET') headers['X-CSRF-Token'] = csrfToken;
-  return fetch(url, { ...options, headers });
-}
+// Vault requests use the same CSRF-attaching fetch as everything else —
+// kept as its own name here since call sites below already read "vaultFetch".
+const vaultFetch = apiFetch;
 
 // Drops decrypted entries from JS/DOM memory. Called when the user leaves
 // the Vault view and on logout — not just when the tab is closed.
@@ -942,7 +1135,7 @@ document.getElementById('vPwGenerate').addEventListener('click', () => {
 
 document.getElementById('logoutBtn').addEventListener('click', async ()=>{
   clearVaultMemory();
-  await fetch('/api/logout',{method:'POST'}).catch(()=>{});
+  await apiFetch('/api/logout',{method:'POST'}).catch(()=>{});
   window.location.href='/login';
 });
 
@@ -1034,7 +1227,7 @@ window.addEventListener('languagechange:zs', () => {
   const active = id => document.getElementById(id)?.classList.contains('active');
   renderGreeting();
   if (active('view-home')) { loadStatus(); loadServices(); loadBackupStatus(); }
-  if (active('view-einstellungen') && userRole === 'admin') loadUsers();
+  if (active('view-einstellungen') && userRole === 'admin') { loadUsers(); loadInvites(); }
   // Skipped while locked: loadVault() would only re-trigger the 403 path.
   if (active('view-vault') && vaultUnlocked) loadVault();
 });
@@ -1056,6 +1249,8 @@ window.addEventListener('languagechange:zs', () => {
   selfUsername = me.username || '';
   csrfToken     = me.csrfToken || '';
   vaultUnlocked = Boolean(me.vaultUnlocked);
+  totpEnabled   = Boolean(me.totpEnabled);
+  renderTwofaState();
   if (userRole === 'admin') document.body.classList.add('is-admin');
 
   renderGreeting();

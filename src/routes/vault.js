@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const crypto = require('crypto');
 const { encryptField, decryptField } = require('../vault-crypto');
 
 // Mounted at /api/vault, after the global requireAuth middleware in
@@ -39,12 +40,18 @@ module.exports = function createVaultRouter(db) {
   }
 
   // ---- CSRF: double-submit token, session-bound (see /api/me in server.js
-  // for how the frontend obtains it) ----
+  // for how the frontend obtains it). Same timing-safe comparison as the shared
+  // requireCsrf in server.js — kept as its own copy here since this router is a
+  // separate module, not because the logic differs. ----
   function requireCsrf(req, res, next) {
     const sent = req.headers['x-csrf-token'];
-    if (!sent || sent !== req.session.csrfToken) {
-      return res.status(403).json({ error: 'Invalid CSRF token', code: 'CSRF' });
-    }
+    const expected = req.session?.csrfToken;
+    const sentBuf = Buffer.from(String(sent || ''));
+    const expectedBuf = Buffer.from(String(expected || ''));
+    const valid = sent && expected
+      && sentBuf.length === expectedBuf.length
+      && crypto.timingSafeEqual(sentBuf, expectedBuf);
+    if (!valid) return res.status(403).json({ error: 'Invalid CSRF token', code: 'CSRF' });
     next();
   }
 
