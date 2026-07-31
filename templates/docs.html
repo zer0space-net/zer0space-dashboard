@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Docs — Zer0space{% endblock %}
+{% block body_class %}page-docs{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/vendor/tabler/tabler-icons.min.css?v={{ asset_version }}">
+<link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_version }}">
+<link rel="stylesheet" href="/static/css/docs.css?v={{ asset_version }}">
+{% endblock %}
+
+{#
+  The handbook for the whole platform: dashboard, database, auth, vault, metrics,
+  frontend, AI assistant, Crimson, deployment and operations.
+
+  The markup here is only the shell. Every word of the documentation lives in
+  static/js/docs-content.js as structured data with a `de` and an `en` field per
+  block, and static/js/docs.js renders it. Three reasons it is data and not
+  markup:
+
+  * the page is bilingual like the rest of the dashboard, and data-i18n replaces
+    textContent — it cannot carry a code block, a table or a list,
+  * the table of contents, the search filter and the scroll spy all need to walk
+    the sections, which is trivial over an array and awkward over a template,
+  * a new section is one object, not a template edit plus two dictionary edits.
+
+  Everything is built with createElement + textContent, so nothing on this page
+  reaches innerHTML.
+#}
+
+{% block body %}
+<div class="docs" id="docs">
+
+  <aside class="docs-side" id="docs-side">
+    <div class="docs-side-head">
+      {{ ui.wordmark("/dashboard") }}
+      <span class="badge badge-accent">Docs</span>
+      <button type="button" class="btn-icon docs-side-close" id="docs-side-close"
+              data-i18n-aria="nav.closeMenu" aria-label="Menü schließen">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="docs-search">
+      <i class="ti ti-search" aria-hidden="true"></i>
+      <input class="input" type="search" id="docs-search" autocomplete="off"
+             data-i18n-ph="docs.searchPh" placeholder="Dokumentation durchsuchen …">
+    </div>
+
+    <nav class="docs-toc" id="docs-toc" data-i18n-aria="docs.onThisPage" aria-label="Inhalt"></nav>
+
+    <p class="docs-side-foot faint" id="docs-version"></p>
+  </aside>
+
+  <div class="docs-scrim" id="docs-scrim" hidden></div>
+
+  <div class="main-col">
+    <header class="topbar">
+      <button type="button" class="btn-icon docs-side-open" id="docs-side-open"
+              data-i18n-aria="nav.openMenu" aria-label="Menü öffnen">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+
+      <div class="topbar-title">
+        <h1 data-i18n="docs.title">Dokumentation</h1>
+        <p class="faint" data-i18n="docs.sub">Wie zer0space aufgebaut ist und warum</p>
+      </div>
+
+      <div class="topbar-actions">
+        <a class="btn btn-ghost btn-sm" href="/dashboard">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+          <span data-i18n="docs.backToDashboard">Dashboard</span>
+        </a>
+        {{ ui.lang_toggle() }}
+      </div>
+    </header>
+
+    <main class="content docs-content" id="main">
+      <article class="docs-body" id="docs-body"></article>
+      <p class="docs-empty faint" id="docs-empty" hidden data-i18n="docs.noResults">
+        Nichts gefunden.
+      </p>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/docs-content.js?v={{ asset_version }}"></script>
+<script src="/static/js/docs.js?v={{ asset_version }}" defer></script>
+{% endblock %}

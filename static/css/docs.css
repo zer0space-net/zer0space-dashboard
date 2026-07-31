@@ -1,0 +1,363 @@
+/* ==========================================================================
+   Docs — the handbook page.
+
+   Loaded after main.css and dashboard.css, and it reuses their shell: the same
+   .topbar, .btn, .badge, .table and .alert as everywhere else, so the page reads
+   as part of the dashboard rather than as an embedded manual. Only what is
+   genuinely new lives here — the table of contents rail, long-form prose
+   measures, code blocks and the callouts.
+
+   Everything is derived from --accent like the rest of the design system, so the
+   theme picker recolours this page too.
+   ========================================================================== */
+
+.page-docs { overflow: hidden; }
+
+.docs {
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+  height: 100dvh;
+}
+
+/* --- Table of contents rail ---------------------------------------------- */
+
+.docs-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 14px;
+  border-right: 1px solid var(--border);
+  background: rgba(6, 10, 20, 0.66);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  min-height: 0;
+}
+
+.docs-side-head { display: flex; align-items: center; gap: 10px; padding: 4px 6px 2px; }
+.docs-side-head .badge { flex: none; }
+.docs-side-close { display: none; margin-left: auto; }
+
+.docs-search { position: relative; }
+.docs-search .ti {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.docs-search .input { padding-left: 34px; font-size: 0.86rem; }
+
+.docs-toc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+  /* Scroll padding so a heading jumped to from the TOC does not land flush
+     against the sticky topbar above the content column. */
+  padding-right: 4px;
+}
+
+.docs-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  font-weight: 520;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.16s, background 0.16s, border-color 0.16s;
+}
+.docs-toc-link .ti { font-size: 18px; line-height: 1; flex: none; }
+.docs-toc-link:hover { color: var(--text); background: rgba(255, 255, 255, 0.045); text-decoration: none; }
+.docs-toc-link.is-active {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.docs-toc-link.is-active .ti { color: var(--accent); }
+.docs-toc-link[hidden] { display: none; }
+
+.docs-side-foot { font-size: 0.72rem; padding: 0 8px; margin-top: auto; }
+
+.docs-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(2, 4, 9, 0.6);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.docs-scrim[hidden] { display: none; }
+
+/* --- Long-form content --------------------------------------------------- */
+
+.docs-content { scroll-padding-top: 20px; }
+
+/* A measure, not the full column width. Prose past ~78 characters per line is
+   measurably harder to scan, and this page is almost entirely prose. Code blocks
+   and tables scroll inside that measure rather than breaking out of it.
+
+   Centred rather than left-aligned: the table of contents already sits on the
+   left, so a left-aligned measure leaves the whole void on one side. */
+.docs-body { max-width: 900px; margin-inline: auto; }
+
+.doc-section {
+  scroll-margin-top: 18px;
+  padding-bottom: 46px;
+  margin-bottom: 46px;
+  border-bottom: 1px solid var(--border);
+  animation: rise 0.32s var(--ease) both;
+}
+.doc-section:last-child { border-bottom: 0; margin-bottom: 0; }
+.doc-section[hidden] { display: none; }
+
+.doc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.doc-head .ti {
+  font-size: 22px;
+  line-height: 1;
+  color: var(--accent);
+  flex: none;
+}
+.doc-head h2 { font-size: 1.32rem; }
+
+.doc-kicker {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin-bottom: 22px;
+}
+
+.doc-section h3 {
+  font-size: 1.02rem;
+  margin-top: 30px;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+.doc-section h4 {
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 22px;
+  margin-bottom: 8px;
+}
+
+.doc-p { color: var(--text-dim); line-height: 1.68; margin-bottom: 12px; font-size: 0.92rem; }
+.doc-p:last-child { margin-bottom: 0; }
+
+.doc-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px; }
+.doc-list li {
+  position: relative;
+  padding-left: 20px;
+  color: var(--text-dim);
+  line-height: 1.62;
+  font-size: 0.92rem;
+}
+.doc-list li::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.75;
+}
+.doc-list.is-numbered { counter-reset: doc-step; }
+.doc-list.is-numbered li { padding-left: 30px; counter-increment: doc-step; }
+.doc-list.is-numbered li::before {
+  content: counter(doc-step);
+  width: auto;
+  height: auto;
+  left: 0;
+  top: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 650;
+  opacity: 1;
+}
+
+.doc-p code, .doc-list code, .doc-note code, .table code {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(6, 11, 22, 0.7);
+  border: 1px solid var(--border);
+  color: var(--text);
+  word-break: break-word;
+}
+.doc-p strong, .doc-list strong, .doc-note strong { color: var(--text); font-weight: 620; }
+
+/* --- Code blocks --------------------------------------------------------- */
+
+.doc-code {
+  margin: 6px 0 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(3, 6, 13, 0.72);
+  overflow: hidden;
+}
+
+.doc-code-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.022);
+}
+.doc-code-lang {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 650;
+}
+.doc-code-file { font-size: 0.74rem; color: var(--text-faint); font-family: var(--font-mono); }
+.doc-code-copy {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  padding: 3px 9px;
+  cursor: pointer;
+  flex: none;
+  transition: color 0.16s, border-color 0.16s;
+}
+.doc-code-copy:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* The one place the measure is deliberately broken: code is not prose, and
+   wrapping it to 860px would fold lines that are meant to be read whole. It
+   scrolls in its own container so the page body still never scrolls sideways. */
+.doc-code pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.79rem;
+  line-height: 1.62;
+  color: #cfe0ff;
+  tab-size: 2;
+}
+.doc-code pre code { font: inherit; background: none; border: 0; padding: 0; }
+
+/* Plain ASCII diagrams. Same box, no language chip, centred-ish and dimmer so
+   they read as a figure rather than as something to copy. */
+.doc-figure pre { color: var(--text-dim); font-size: 0.74rem; line-height: 1.5; }
+
+/* --- Callouts ------------------------------------------------------------ */
+
+.doc-note {
+  display: flex;
+  gap: 12px;
+  padding: 13px 15px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  line-height: 1.62;
+  margin: 6px 0 18px;
+}
+.doc-note .ti { font-size: 18px; line-height: 1.4; flex: none; color: var(--accent); }
+.doc-note-body { min-width: 0; }
+.doc-note-title {
+  display: block;
+  color: var(--text);
+  font-weight: 620;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.doc-note[data-tone="warn"] { border-color: color-mix(in srgb, var(--warn) 34%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.doc-note[data-tone="warn"] .ti, .doc-note[data-tone="warn"] .doc-note-title { color: var(--warn); }
+.doc-note[data-tone="crit"] { border-color: color-mix(in srgb, var(--crit) 34%, transparent); background: color-mix(in srgb, var(--crit) 10%, transparent); }
+.doc-note[data-tone="crit"] .ti, .doc-note[data-tone="crit"] .doc-note-title { color: var(--crit); }
+.doc-note[data-tone="ok"] { border-color: color-mix(in srgb, var(--ok) 34%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.doc-note[data-tone="ok"] .ti, .doc-note[data-tone="ok"] .doc-note-title { color: var(--ok); }
+
+/* --- Tables -------------------------------------------------------------- */
+
+.doc-table-wrap {
+  margin: 6px 0 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.doc-table-wrap .table { margin: 0; min-width: 420px; }
+.doc-table-wrap .table td { color: var(--text-dim); vertical-align: top; }
+.doc-table-wrap .table td:first-child { color: var(--text); }
+/* The first column is almost always a short identifier. Auto table layout gives
+   it whatever is left after the prose column, which was narrow enough to break
+   "dashboard" across two lines mid-word. The wrapper scrolls, so keeping the
+   chip whole costs nothing. */
+.doc-table-wrap .table td:first-child code { white-space: nowrap; }
+.doc-table-wrap .table tr:last-child td { border-bottom: 0; }
+
+/* --- File tree ----------------------------------------------------------- */
+
+.doc-tree {
+  margin: 6px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(3, 6, 13, 0.6);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.75;
+  overflow-x: auto;
+  color: var(--text-dim);
+  /* The tree is built from text nodes, not from a <pre>, because the **bold**
+     markers have to become real elements. Without this the newlines collapse
+     and the whole tree renders as one line. */
+  white-space: pre;
+}
+.doc-tree strong { color: var(--accent); font-weight: 600; }
+
+/* --- Empty state --------------------------------------------------------- */
+
+.docs-empty { padding: 40px 4px; font-size: 0.9rem; }
+.docs-empty[hidden] { display: none; }
+
+/* --- Responsive ---------------------------------------------------------- */
+
+.docs-side-open { display: none; }
+
+@media (max-width: 1000px) {
+  .docs { grid-template-columns: minmax(0, 1fr); }
+  .docs-side {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(300px, 86vw);
+    transform: translateX(-102%);
+    transition: transform 0.26s var(--ease);
+  }
+  .docs.is-open .docs-side { transform: none; }
+  .docs-side-close, .docs-side-open { display: grid; }
+}
+
+@media (max-width: 720px) {
+  .doc-head h2 { font-size: 1.14rem; }
+  .doc-code pre { font-size: 0.74rem; }
+  .doc-figure pre { font-size: 0.66rem; }
+}

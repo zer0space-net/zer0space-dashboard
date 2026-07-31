@@ -46,7 +46,7 @@ from . import ai, auth, config, crimson, crimson_sso, db, metrics, totp, vault
 # Bump when static assets change in a way browsers must not keep. Templates
 # append it to every CSS/JS URL, which is what makes it safe to serve them with
 # a long max-age despite there being no build step and no content hashes.
-ASSET_VERSION = "4.3.1"
+ASSET_VERSION = "4.4.0"
 
 # Ceiling on a buffered request body. The API only ever receives small JSON
 # objects — the largest legitimate one is a vault entry, capped by
@@ -782,6 +782,22 @@ async def monitoring_page(request: Request) -> Response:
     if not session or not session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
     return page(request, "monitoring.html")
+
+
+@app.get("/docs", response_class=HTMLResponse)
+async def docs_page(request: Request) -> Response:
+    """The handbook: how the platform is built and why.
+
+    Behind the session gate for the same reason /monitoring is. It is not a
+    product manual — it names hostnames, LAN addresses, secret names, the
+    schema and the rate-limit thresholds, all of which are useful to somebody
+    probing the login page. The content itself is static, so this route only
+    renders the shell; static/js/docs-content.js carries the text.
+    """
+    session = get_session(request)
+    if not session or not session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    return page(request, "docs.html")
 
 
 @app.get("/maintenance", response_class=HTMLResponse)

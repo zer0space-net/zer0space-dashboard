@@ -118,6 +118,7 @@ environment variable in production.
 | `/setup` | public, once | First-run wizard; seals itself permanently |
 | `/dashboard` | session | The app |
 | `/monitoring` | session | Always-on wall view for a kiosk tablet |
+| `/docs` | session | The handbook: architecture, auth, vault, AI, Crimson, deployment |
 | `/loading` | public | Standalone loading screen |
 | `/maintenance` | public | Maintenance notice (`MAINTENANCE_MODE=true`) |
 | `/healthz` | public | Liveness; deliberately does not touch the database |

@@ -76,11 +76,12 @@ src/
 static/
 ├── css/  main.css (design system) + one file per page family
 ├── js/   boot → i18n → ui → page script  (load order matters)
+│        docs-content.js  the /docs handbook, as bilingual data
 └── img/  May artwork and the ten chibi stickers
 templates/
 ├── base.html      every page extends this
 ├── _macros.html   wordmark, brand mark, tagline, chibi, language toggle
-└── landing / login / register / setup / dashboard / monitoring / 404 / loading / maintenance
+└── landing / login / register / setup / dashboard / monitoring / docs / 404 / loading / maintenance
 static/vendor/
 └── tabler/        Tabler Icons webfont, vendored (CSP forbids a CDN) — service icons
 scripts/
@@ -200,6 +201,39 @@ Two things that are easy to get wrong:
 The chosen language lives in `localStorage` (`zs-lang`) — a per-browser display
 preference, deliberately not a DB column, so switching needs no round trip and no
 schema change.
+
+## The `/docs` handbook
+
+`/docs` is the in-app explanation of the whole platform — architecture, request
+path, database, auth, 2FA, vault, metrics, frontend, the AI service, Crimson,
+deployment, operations, the API and the conventions. Sixteen sections, session
+gated like `/monitoring` (it names hostnames, secret names and the rate-limit
+thresholds).
+
+The text is **not** in `i18n.js`. It lives in `static/js/docs-content.js` as
+structured data, with a `de` and an `en` field per block, and `static/js/docs.js`
+renders it. Three reasons it is data rather than markup or dictionary entries:
+`data-i18n` replaces `textContent` and so cannot carry a table, a list or a code
+sample; the table of contents, the search and the scroll spy all walk the
+sections; and a new section is one object instead of a template edit plus two
+dictionary edits.
+
+Rules when touching it:
+
+- **Code samples are shared between the languages, diagrams are not.** A
+  translated identifier would stop matching the source it documents, so `code`
+  blocks are one string. A `figure` is prose in a box, so its `code` takes a
+  `{de, en}` pair — an untranslated diagram is the one thing that gave the
+  English page German text.
+- Every sample is **copied from the file named above it**. This is documentation
+  of the real thing, not a parallel design document: when the code changes, the
+  matching section changes with it.
+- Nothing on the page reaches `innerHTML`. `docs.js` builds every node with
+  `createElement` + `textContent`; the inline markup it does support is
+  deliberately three things only (`` `code` ``, `**strong**`, `[text](url)`),
+  and links go through `ZS_UI.safeUrl()`.
+- The page chrome (title, search placeholder, "copy") *is* in `i18n.js` under
+  `docs.*`, and follows the normal parity rule.
 
 ## Design
 

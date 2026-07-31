@@ -44,6 +44,17 @@
     'nav.expand': 'Seitenleiste ausklappen',
     'nav.monitoring': 'Monitoring',
 
+    /* Only the page chrome lives here. The documentation text itself is in
+       static/js/docs-content.js, where every block carries its own de/en pair —
+       a table or a code sample cannot travel through a data-i18n attribute. */
+    'docs.title': 'Dokumentation',
+    'docs.sub': 'Wie zer0space aufgebaut ist und warum',
+    'docs.searchPh': 'Dokumentation durchsuchen …',
+    'docs.backToDashboard': 'Dashboard',
+    'docs.onThisPage': 'Auf dieser Seite',
+    'docs.noResults': 'Nichts gefunden. Andere Suchbegriffe versuchen.',
+    'docs.version': 'Dashboard {version}',
+
     'common.username': 'Benutzername',
     'common.password': 'Passwort',
     'common.name': 'Name',
@@ -522,6 +533,14 @@
     'nav.collapse': 'Collapse sidebar',
     'nav.expand': 'Expand sidebar',
     'nav.monitoring': 'Monitoring',
+
+    'docs.title': 'Documentation',
+    'docs.sub': 'How zer0space is built, and why',
+    'docs.searchPh': 'Search the documentation …',
+    'docs.backToDashboard': 'Dashboard',
+    'docs.onThisPage': 'On this page',
+    'docs.noResults': 'Nothing found. Try different words.',
+    'docs.version': 'Dashboard {version}',
 
     'common.username': 'Username',
     'common.password': 'Password',
