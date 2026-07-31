@@ -479,7 +479,10 @@
     'err.AI_DISABLED': 'Der Assistent ist deaktiviert.',
     'err.AI_KEY_MISSING': 'Es ist kein API-Schlüssel hinterlegt.',
     'err.AI_MODEL_MISSING': 'Es ist kein Modell ausgewählt.',
-    'err.AI_PROVIDER': 'Der Anbieter hat einen Fehler gemeldet.',
+    // Carries {error} because the provider's own words are the whole value here:
+    // "invalid x-api-key", "model not found", "insufficient quota". Without it an
+    // admin setting the assistant up only learns that something went wrong.
+    'err.AI_PROVIDER': 'Der Anbieter hat einen Fehler gemeldet: {error}',
     'err.AI_PROVIDER_UNKNOWN': 'Der eingestellte Anbieter ist unbekannt.',
     'err.AI_PROVIDER_INVALID': 'Unbekannter Anbieter.',
     'err.AI_MESSAGE_REQUIRED': 'Bitte eine Nachricht eingeben.',
@@ -955,7 +958,7 @@
     'err.AI_DISABLED': 'The assistant is switched off.',
     'err.AI_KEY_MISSING': 'No API key has been set.',
     'err.AI_MODEL_MISSING': 'No model has been selected.',
-    'err.AI_PROVIDER': 'The provider reported an error.',
+    'err.AI_PROVIDER': 'The provider reported an error: {error}',
     'err.AI_PROVIDER_UNKNOWN': 'The configured provider is unknown.',
     'err.AI_PROVIDER_INVALID': 'Unknown provider.',
     'err.AI_MESSAGE_REQUIRED': 'Please enter a message.',

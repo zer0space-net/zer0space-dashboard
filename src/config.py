@@ -278,7 +278,13 @@ CRIMSON_SSO_ENABLED = bool(CRIMSON_ENABLED and CRIMSON_SSO_SECRET and CRIMSON_SS
 #
 # Blank turns the whole feature off: /api/ai/* answers 503 and the AI chat panel
 # stays hidden, so this is inert until a deployment opts in.
-AI_SERVICE_URL = os.environ.get("AI_SERVICE_URL", "http://ai:8000").rstrip("/") or None
+#
+# Deliberately no default. docker-compose.yml sets it to http://ai:8000 next to
+# the ai service it also defines, so the shipped stack is unaffected — but a
+# deployment that only pulls a newer image would otherwise get the chat panel
+# switched on by a default it never asked for, pointed at a service that is not
+# in its stack, and every message would come back "AI service not reachable".
+AI_SERVICE_URL = os.environ.get("AI_SERVICE_URL", "").strip().rstrip("/") or None
 # Header the AI service checks. Its counterpart secret is resolved in ai.py with
 # the same chain as session_secret: Swarm secret, env var, DB row, generated.
 AI_TOKEN_HEADER = "x-zer0space-ai-token"

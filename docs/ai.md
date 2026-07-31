@@ -124,6 +124,13 @@ Blank `AI_SERVICE_URL`. The chat panel and the AI settings tab are not rendered
 at all (`ai_enabled` in the template), `ai.js` is not loaded, and `/api/ai/*`
 answers 503. The AI-category service tiles are unaffected.
 
+There is deliberately **no default address** in `config.py`, so unset means off.
+`docker-compose.yml` supplies `http://ai:8000` right next to the `ai` service it
+also defines, which is why the shipped stack has the assistant on; deleting that
+one environment line is the off switch. A default in the code instead would
+switch the panel on for every deployment that merely pulls a newer image,
+pointing it at a service that is not in its stack.
+
 ## Frontend notes
 
 `static/js/ai.js` defines `window.ZS_AI` and is loaded only when the gateway is
