@@ -106,7 +106,17 @@
   mask-image: radial-gradient(120% 90% at 50% 40%, #000 10%, transparent 78%);
 }
 
-@media (max-width: 620px) {
+@media (max-width: 768px) {
   .status-chibi { width: 118px; }
   .sky-photo-wide { opacity: 0.2; }
+  .status-page { padding: 24px 18px calc(32px + env(safe-area-inset-bottom)); }
+  .status-sub { max-width: none; }
+  .status-actions { width: 100%; }
+  .status-actions .btn { flex: 1 1 190px; }
+}
+
+/* One action per row: "back to the dashboard" and "sign in" are different enough
+   that a mistap on a 375 px screen is worth designing out. */
+@media (max-width: 400px) {
+  .status-actions .btn { flex-basis: 100%; }
 }

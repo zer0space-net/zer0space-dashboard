@@ -342,7 +342,7 @@
 
 .docs-side-open { display: none; }
 
-@media (max-width: 1000px) {
+@media (max-width: 1024px) {
   .docs { grid-template-columns: minmax(0, 1fr); }
   .docs-side {
     position: fixed;
@@ -351,13 +351,28 @@
     width: min(300px, 86vw);
     transform: translateX(-102%);
     transition: transform 0.26s var(--ease);
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-left: max(14px, env(safe-area-inset-left));
   }
   .docs.is-open .docs-side { transform: none; }
   .docs-side-close, .docs-side-open { display: grid; }
+
+  /* The table of contents is the only way to move around a sixteen-section
+     handbook without a scrollbar, so its rows get the full thumb target. */
+  .docs-toc-link { min-height: 44px; padding: 10px 12px; font-size: 0.9rem; }
+  /* Both properties restated: the desktop rule above is a two-class selector and
+     outranks the 16 px baseline main.css sets for touch widths, so a tap on the
+     search field would zoom the page in and leave it there. */
+  .docs-search .input { padding-left: 38px; font-size: 16px; }
+  /* The copy button is a 3 px-padded chip on desktop; on a touch screen it gets
+     a real hit area through padding rather than by growing its label. */
+  .doc-code-copy { min-height: 44px; padding: 8px 14px; font-size: 0.76rem; }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .doc-head h2 { font-size: 1.14rem; }
   .doc-code pre { font-size: 0.74rem; }
   .doc-figure pre { font-size: 0.66rem; }
+  .doc-code-head { flex-wrap: wrap; gap: 8px; }
+  .doc-section { padding-bottom: 34px; margin-bottom: 34px; }
 }

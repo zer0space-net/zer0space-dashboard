@@ -101,10 +101,26 @@
 
 /* --- Responsive ---------------------------------------------------------- */
 
-@media (max-width: 640px) {
-  .wall { width: calc(100% - 24px); }
-  .wall-status { width: 100%; }
+@media (max-width: 768px) {
+  .wall {
+    width: calc(100% - 24px);
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+  }
+  .wall-head { gap: 12px; }
+  .wall-status { width: 100%; gap: 10px; }
   .wall-clock { margin-left: auto; }
+  /* The wall is read at a distance on a screen and up close on a phone; the
+     phone is the case where the type can come down and the tiles can stop
+     pretending they have a 4:3 panel to fill. */
+  .wall-tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+  .wall-tiles .tile { padding: 14px 15px 16px; }
+  .wall-tiles .tile-value { font-size: 1.5rem; }
+  .wall-hosts { grid-template-columns: 1fr; }
+  .wall-hosts .host { padding: 16px 17px 18px; }
+}
+
+@media (max-width: 400px) {
+  .wall-tiles { grid-template-columns: 1fr; }
 }
 
 /* On a real wall/tablet the screen is often left untouched for hours — respect

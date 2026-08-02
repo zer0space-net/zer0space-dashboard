@@ -37,6 +37,8 @@
 .auth-copy h1 { font-size: clamp(1.45rem, 3.2vw, 1.85rem); }
 .auth-copy p { font-size: 0.9rem; line-height: 1.6; }
 
+/* The `[hidden] { display: none !important }` rule in main.css is what keeps
+   this from showing the TOTP step (which ships hidden) on first paint. */
 .auth-form form { display: flex; flex-direction: column; gap: 16px; }
 
 .auth-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -137,6 +139,9 @@
 
 /* --- Responsive ---------------------------------------------------------- */
 
+/* The split card still fits an iPad in landscape, so it survives the tablet
+   breakpoint and only folds when the two columns would genuinely be too narrow
+   to read. */
 @media (max-width: 860px) {
   .auth-card { grid-template-columns: 1fr; max-width: 480px; }
   /* The artwork becomes a banner above the form rather than disappearing —
@@ -147,8 +152,34 @@
   .auth-quote { display: none; }
 }
 
+@media (max-width: 768px) {
+  /* Every action on these three pages is the only thing you can do at that
+     point in the flow, so on a phone they all become full-width thumb targets
+     rather than buttons hugging their own label. */
+  .auth-form .btn { width: 100%; }
+  .auth-form { gap: 20px; }
+  .auth-form form { gap: 18px; }
+  .auth-row { justify-content: flex-start; }
+  .auth-foot { flex-direction: column; gap: 0; }
+  /* "Ask an admin for a code" is the only way out of a dead end on this page,
+     so it gets a full row rather than a 21 px line of text. */
+  .auth-foot a { display: inline-flex; align-items: center; min-height: 44px; }
+  .auth-head .wordmark { font-size: 0.95rem; letter-spacing: 0.18em; }
+}
+
 @media (max-width: 460px) {
   .auth { padding: 0; }
-  .auth-card { border-radius: 0; border-left: 0; border-right: 0; min-height: 100dvh; align-content: start; }
+  .auth-card {
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    min-height: 100dvh;
+    align-content: start;
+    /* The card is now the whole screen, so the safe areas are its problem: on a
+       notched phone in landscape the form would otherwise start under the
+       rounded corner. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
   .auth-art { min-height: 130px; }
+  .auth-form { padding: 22px 18px 30px; }
 }

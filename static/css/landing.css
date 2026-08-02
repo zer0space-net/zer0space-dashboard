@@ -187,19 +187,39 @@
 
 /* --- Responsive ---------------------------------------------------------- */
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .hero-grid { grid-template-columns: 1fr; }
   .hero-art { order: -1; width: min(72%, 300px); }
   .hero-copy { max-width: none; }
 }
 
-@media (max-width: 620px) {
-  .hero { padding-top: 40px; }
+@media (max-width: 768px) {
+  .hero { padding-top: 36px; }
   .hero-art { width: min(62%, 230px); }
+
+  /* The portrait sits above the copy once the grid is one column, so centring
+     the text keeps the column reading as one thing instead of as an image with
+     a left-aligned paragraph hanging off it. */
+  .hero-copy { align-items: center; text-align: center; }
+  .hero-lede, .hero-sub { max-width: 44ch; }
+  .hero-actions { justify-content: center; width: 100%; }
+  .hero-actions .btn { flex: 1 1 220px; }
+
+  .feature-grid { grid-template-columns: 1fr; margin-top: 26px; }
+  .feature { padding: 22px 20px 24px; }
+
   .about-body { flex-direction: column; align-items: center; text-align: center; }
   .about-may { flex-direction: column; align-items: center; text-align: center; }
   .about-may-link { align-self: center; }
   .about-facts { grid-template-columns: repeat(2, 1fr); }
+  .about-card .row .btn { flex: 1 1 180px; }
+
   .strip-inner { padding: 22px; }
-  .strip-inner .push { margin-left: 0; }
+  .strip-inner .push { margin-left: 0; width: 100%; }
+  .strip-inner .push .btn { flex: 1 1 180px; }
+  .section-sub { max-width: none; }
+}
+
+@media (max-width: 400px) {
+  .hero-actions .btn, .strip-inner .push .btn, .about-card .row .btn { flex-basis: 100%; }
 }

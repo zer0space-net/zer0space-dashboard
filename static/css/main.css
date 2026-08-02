@@ -112,6 +112,16 @@ body {
 
 img, svg, video { max-width: 100%; display: block; }
 button, input, select, textarea { font: inherit; color: inherit; }
+
+/* The `hidden` attribute is how every script in this project shows and hides
+   things (`el.hidden = true`), but the user agent implements it as a plain
+   `display: none` rule — which any class selector that sets `display` outranks.
+   That is not hypothetical: `.auth-form form` kept the second login step on the
+   page from the first paint, and `.ai-send` kept the assistant's stop button
+   next to its send button forever. This is the one place worth an !important:
+   without it every layout rule has to remember not to collide with `hidden`,
+   and the failure is silent. */
+[hidden] { display: none !important; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -477,6 +487,12 @@ textarea.input { resize: vertical; min-height: 86px; }
 .nav a:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); text-decoration: none; }
 .nav a.is-active { color: var(--text); background: var(--accent-soft); }
 
+/* The three lines that open the header nav below 768px. Hidden on desktop, where
+   the links are already on the bar — it exists so the phone layout has somewhere
+   to put four links and a language switch that do not fit on one 375 px row. */
+.nav-toggle { display: none; margin-left: auto; }
+.nav-scrim { display: none; }
+
 .site-footer {
   border-top: 1px solid var(--border);
   margin-top: 90px;
@@ -713,14 +729,150 @@ textarea.input { resize: vertical; min-height: 86px; }
 }
 
 /* --- Responsive ---------------------------------------------------------- */
+/* Two breakpoints carry the whole design system:
 
-@media (max-width: 720px) {
+     max-width: 1024px   tablet — side rails collapse, grids lose a column,
+                                  and everything becomes a touch target
+     max-width: 768px    phone  — one column, drawer navigation
+
+   Nothing above 1024 px is touched, so the desktop view is byte-for-byte the
+   layout it always was.
+
+   The touch sizing sits at the tablet breakpoint rather than the phone one on
+   purpose: a 1024 px iPad is a finger, not a mouse, and it is the width where
+   the old 34 px buttons were hardest to hit — they were laid out for a pointer
+   but shown at tablet density. */
+
+@media (max-width: 1024px) {
+  .shell { width: calc(100% - 32px); }
+  .chibi-btn { width: 78px; height: 78px; }
+
+  /* --- Touch targets ----------------------------------------------------- */
+  /* 44 x 44 px is the Apple HIG minimum and the one number worth being literal
+     about: below it, a control is measurably harder to hit with a thumb. */
+  .btn { min-height: 44px; padding: 11px 18px; }
+  .btn-sm { min-height: 44px; padding: 10px 15px; font-size: 0.86rem; }
+  .btn-icon { width: 44px; height: 44px; }
+  .modal-close { width: 44px; height: 44px; }
+  /* The reveal toggle sits inside the field, so its target is bounded by the
+     field's own height — which the 13 px padding below already put at 48 px. */
+  .input-affix { width: 44px; height: 44px; right: 2px; }
+  .lang-toggle button { min-height: 44px; min-width: 44px; padding: 10px 16px; font-size: 0.78rem; }
+  .check { min-height: 44px; }
+  .check input { width: 20px; height: 20px; }
+  .swatch { width: 44px; height: 44px; }
+  /* The wordmark is the "home" link in both bars; at 26 px tall it was the one
+     control on the page you had to aim at. */
+  a.wordmark { min-height: 44px; }
+
+  /* --- Forms ------------------------------------------------------------- */
+  /* iOS Safari zooms the viewport when a focused input's text is under 16 px,
+     and never zooms back out — on the iPad as much as on the phone. Every field
+     the user can focus has to be at least 16 px; this is the whole reason the
+     rule exists. */
+  .input, select.input, textarea.input {
+    font-size: 16px;
+    padding: 13px 14px;
+  }
+  .input-wrap .input { padding-right: 52px; }
+}
+
+@media (max-width: 768px) {
   .shell { width: calc(100% - 28px); }
   .site-header .shell { height: 58px; gap: 12px; }
-  .nav { gap: 0; }
-  .nav a { padding: 6px 9px; font-size: 0.82rem; }
-  .chibi { right: 12px; bottom: 12px; }
-  .chibi-btn { width: 68px; height: 68px; border-radius: 16px; }
-  .chibi-bubble { max-width: 150px; font-size: 0.72rem; }
+
+  /* --- Header drawer ----------------------------------------------------- */
+  /* The links leave the bar and become a panel under it. `position: fixed`
+     rather than absolute so a long list scrolls against the viewport instead of
+     stretching the sticky header it hangs from. */
+  .nav-toggle { display: grid; margin-left: 0; }
+  /* The nav is out of flow once it is a drawer, so the language switch is what
+     holds the right-hand side of the bar apart from the wordmark. */
+  .site-header .lang-toggle { margin-left: auto; }
+
+  .nav {
+    position: fixed;
+    inset: 58px 0 auto 0;
+    z-index: 41;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    margin-left: 0;
+    padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 58px);
+    overflow-y: auto;
+    background: rgba(4, 7, 14, 0.97);
+    border-bottom: 1px solid var(--border);
+    -webkit-backdrop-filter: saturate(1.3) blur(16px);
+    backdrop-filter: saturate(1.3) blur(16px);
+    /* Collapsed by default. `visibility` (not just opacity) keeps the links out
+       of the tab order and out of the accessibility tree while closed. */
+    transform: translateY(-8px);
+    opacity: 0;
+    visibility: hidden;
+    transition: transform 0.22s var(--ease), opacity 0.22s var(--ease), visibility 0.22s;
+  }
+  .site-header.nav-open .nav { transform: none; opacity: 1; visibility: visible; }
+
+  .nav a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 0.95rem;
+  }
+
+  .site-header.nav-open .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 58px 0 0 0;
+    z-index: 39;
+    background: rgba(2, 4, 9, 0.55);
+  }
+
+  /* --- Chrome ------------------------------------------------------------ */
+  .site-footer { margin-top: 56px; padding: 26px 0 34px; }
+  .site-footer .shell { flex-direction: column; align-items: flex-start; gap: 16px; }
+  /* Short labels ("Docs", "Über") are narrower than the 44 px minimum on their
+     own, so the padding is what makes the target rather than the text. */
+  .site-footer nav { margin-left: 0; gap: 0 8px; margin-inline: -8px; }
+  .site-footer nav a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 44px;
+    padding-inline: 8px;
+  }
+
+  /* The card fills the bottom of the screen instead of floating in the middle:
+     a long dialog is then scrolled with the thumb where the thumb already is,
+     and the action buttons sit above the home indicator rather than behind it. */
+  .modal { padding: 0; place-items: end center; }
+  .modal-card {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+    padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  /* May's floating companion is the one element that is pure decoration and
+     also permanently on top of the bottom-right corner — exactly where a send
+     button, a modal action row or a FAB lands on a phone. She keeps the hero
+     artwork and the sticker on the error pages; the overlay goes. */
+  .chibi { display: none; }
+
   .sky-photo { opacity: 0.28; -webkit-mask-image: none; mask-image: none; }
+
+  /* Long unbroken strings (hostnames, tokens, service URLs) are the usual cause
+     of a page that scrolls sideways on a 375 px screen. Deliberately not table
+     cells: a table already scrolls inside .table-wrap, and letting cells break
+     anywhere makes the auto layout treat one character as the minimum column
+     width — an invite code came out as seven stacked fragments. */
+  h1, h2, h3, h4, p, li { overflow-wrap: anywhere; }
+}
+
+@media (max-width: 400px) {
+  .shell { width: calc(100% - 20px); }
 }

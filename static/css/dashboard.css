@@ -335,6 +335,11 @@
 
 .icon-help { font-size: 0.78rem; margin-top: -4px; }
 
+/* The custom-accent picker. A class rather than the inline style it used to
+   carry, so the mobile breakpoint can grow it to a thumb target without an
+   !important fighting the attribute. */
+.color-input { width: 56px; height: 40px; padding: 4px; flex: none; }
+
 .icon-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
 .icon-chip {
   display: inline-grid;
@@ -554,7 +559,10 @@
 
 /* --- Responsive ---------------------------------------------------------- */
 
-@media (max-width: 1000px) {
+/* Tablet. The sidebar stops being a column and becomes an overlay drawer: at
+   1024 px the 258 px rail costs a quarter of the width, and the node and
+   service grids need that width more than the navigation does. */
+@media (max-width: 1024px) {
   /* Both selectors, so a saved "collapsed" preference (higher specificity than
      plain .app) cannot shrink the drawer to a 66px rail on mobile. */
   .app, .app.is-collapsed { grid-template-columns: 1fr; }
@@ -562,10 +570,12 @@
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 50;
-    width: 262px;
+    width: min(280px, 84vw);
     transform: translateX(-100%);
     transition: transform 0.28s var(--ease);
     background: rgba(6, 10, 20, 0.96);
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
   }
   /* The drawer always opens full-width with labels, regardless of the desktop
      collapse state — the rail only makes sense next to content, not over it. */
@@ -581,20 +591,101 @@
      (inside it) closes it again. */
   .sidebar-open { display: grid; }
   .sidebar-collapse { display: grid; }
+
+  /* Two up rather than the three or four a 1024 px auto-fill would give: a node
+     card carries three metric bars with a label and a value on each, and they
+     stop being readable at a glance well before the track gets narrow. */
+  .host-grid, .service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tab-pane[data-pane="security"] { grid-template-columns: 1fr; }
+
+  /* dashboard.css redefines .btn-icon at 36 px and loads after main.css, so the
+     44 px rule there loses on source order at equal specificity. The drawer
+     button and the sidebar's own control are the two most-used targets on a
+     touch screen; they have to be restated here. */
+  .btn-icon { width: 44px; height: 44px; }
+  #logout { min-height: 44px; }
+  #view-settings .color-input { width: 56px; height: 44px; padding: 4px; }
+  #view-settings .check input { width: 20px; height: 20px; }
+  #view-settings .input, #view-settings select.input { font-size: 16px; }
 }
 
-@media (max-width: 620px) {
-  .topbar { padding: 12px 16px; gap: 10px; }
+/* Phone. One column everywhere, and every control at a thumb-sized target. */
+@media (max-width: 768px) {
+  .topbar { padding: 10px 14px; gap: 8px; }
+  .topbar { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+  .topbar-title h1 { font-size: 1rem; }
+  .topbar-title p { display: none; }
+  .topbar-actions { gap: 6px; }
+  /* Icon-only. Four labelled buttons plus a language switch do not fit on a
+     375 px row, and these are the icons people already know from the desktop
+     view of the same bar. */
   .topbar-actions .btn span { display: none; }
-  .topbar-actions .btn { padding: 8px 10px; }
-  .tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-  .tile-value { font-size: 1.4rem; }
+  .topbar-actions .btn { width: 44px; padding: 0; }
+  /* On the dashboard the bar already carries the drawer button, Monitoring,
+     Docs and Refresh; the language switch is the one control there that also
+     lives somewhere else (Settings -> Darstellung), so it is the one that goes.
+     The docs page keeps its own — the page is the bilingual content. */
+  .page-dashboard .topbar .lang-toggle { display: none; }
+  .topbar .lang-toggle button { padding: 10px 12px; min-width: 44px; }
+  .content {
+    padding: 16px 14px calc(40px + env(safe-area-inset-bottom));
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+
+  .sidebar-nav { gap: 4px; }
+  .nav-item { min-height: 46px; font-size: 0.95rem; }
+
+  /* Cards, one under the other, at full width. */
   .host-grid, .service-grid { grid-template-columns: 1fr; }
-  .tab-pane[data-pane="security"] { grid-template-columns: 1fr; }
-  .settings-tab { min-width: 0; padding: 11px 12px; font-size: 0.9rem; }
-  #view-settings .panel-head, #view-settings .panel-body { padding: 18px; }
-  .panel-head { flex-wrap: wrap; }
-  .content { padding: 16px 14px 40px; }
+  /* min() so the track can never be wider than the container: at 320 px a bare
+     minmax(150px, 1fr) would overflow rather than fall back to one column. */
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; }
+  .tile { padding: 14px 15px 15px; }
+  .tile-value { font-size: 1.4rem; }
+
+  .block { margin-top: 24px; }
+  .panel-head { flex-wrap: wrap; padding: 16px; }
+  /* The panel's action button drops onto its own row instead of being squeezed
+     against the heading it shares a line with. */
+  .panel-head > .btn { margin-left: 0; width: 100%; }
+  .panel-body { padding: 16px; }
+
+  /* One row that scrolls beats seven tabs wrapping into four rows and pushing
+     the pane they select off the bottom of the screen. */
+  .settings-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+  .settings-tabs::-webkit-scrollbar { display: none; }
+  .settings-tab { flex: 0 0 auto; min-width: 0; padding: 11px 14px; font-size: 0.9rem; scroll-snap-align: start; }
+  #view-settings .panel-head, #view-settings .panel-body { padding: 16px; }
+  #view-settings .input, #view-settings select.input { padding: 13px 14px; }
+
+  .invite-form { gap: 10px; }
+  .invite-form .field { flex: 1 1 100%; }
+  .invite-form .btn { width: 100%; }
+  .invite-fresh { padding: 14px; }
+  .invite-fresh .row { margin-left: 0; width: 100%; }
+  .invite-fresh .row .btn { flex: 1; }
+
+  /* A busy audit log inside a short viewport turns into a scroll box within a
+     scroll box; shorter is easier to get out of. */
+  .audit-scroll { max-height: 260px; }
+
+  /* Vault entries become cards: title and detail on their own lines, the copy /
+     reveal / edit / delete row full width underneath, where all four buttons
+     are reachable instead of crushed against the right edge. */
+  .vault-entry { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; }
+  .vault-actions { margin-left: 0; width: 100%; }
+  .vault-actions .btn { flex: 1; }
+  .vault-main span { white-space: normal; }
+}
+
+@media (max-width: 400px) {
+  .tiles { grid-template-columns: 1fr; }
 }
 
 /* --- AI assistant --------------------------------------------------------- */
@@ -758,9 +849,31 @@
 .ai-cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
 .ai-prompt { font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.55; resize: vertical; }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .ai-msg { max-width: 100%; }
   .ai-actions { width: 100%; }
-  .ai-actions .input-sm { max-width: none; flex: 1; }
-  .ai-log { height: clamp(240px, 46vh, 460px); }
+  .ai-actions .input-sm { max-width: none; flex: 1; font-size: 16px; }
+  .ai-actions .btn { flex: 1; }
+
+  /* The log takes what is left of the viewport and the composer sticks to the
+     bottom of the panel. Without this the input is simply the last thing in a
+     long document: every answer pushes it further down and you have to scroll
+     back to type again — the one interaction on this page that has to stay put. */
+  .ai-log { height: auto; flex: 1; min-height: 42dvh; max-height: 58dvh; }
+  .ai-composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding-top: 10px;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--glass-solid) 72%, transparent);
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+  /* 16px, or iOS zooms the whole page in the moment the composer is focused and
+     never zooms back out. */
+  .ai-input { font-size: 16px; min-height: 46px; }
+  .ai-send { width: 46px; height: 46px; }
+  .ai-example { min-height: 44px; }
+  .ai-hint { display: none; }
 }

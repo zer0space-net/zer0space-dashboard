@@ -161,7 +161,11 @@
     // is open/closed, the rail is wide/narrow, and merging them made the button
     // do the wrong thing at whichever width you were not testing.
     var COLLAPSE_KEY = 'zs-sidebar';
-    function isMobile() { return window.matchMedia('(max-width: 1000px)').matches; }
+    // Must match the breakpoint at which dashboard.css turns the sidebar into a
+    // drawer. If the two drift apart, the button folds the sidebar to a rail at
+    // a width where the rail is not rendered — a click that appears to do
+    // nothing.
+    function isMobile() { return window.matchMedia('(max-width: 1024px)').matches; }
     function setCollapsed(on) {
       if (app) app.classList.toggle('is-collapsed', on);
       try { localStorage.setItem(COLLAPSE_KEY, on ? 'collapsed' : 'expanded'); } catch (e) { /* ignore */ }
