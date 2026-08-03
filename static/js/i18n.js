@@ -454,7 +454,9 @@
     'ai.stopped': '(abgebrochen)',
     'ai.hint': 'Enter sendet, Shift+Enter macht einen Zeilenumbruch.',
     'ai.you': 'Du',
-    'ai.assistant': 'Assistent',
+    // A name, so it is the same string in both dictionaries. The panel heading
+    // stays "Assistent" because that names the feature, not the character.
+    'ai.assistant': 'May',
     'ai.emptyTitle': 'Frag etwas über den Cluster.',
     'ai.example1': 'Ist gerade irgendwas kaputt?',
     'ai.example2': 'Wie voll ist die Platte auf zs-state-01?',
@@ -962,7 +964,7 @@
     'ai.stopped': '(stopped)',
     'ai.hint': 'Enter sends, Shift+Enter adds a line break.',
     'ai.you': 'You',
-    'ai.assistant': 'Assistant',
+    'ai.assistant': 'May',
     'ai.emptyTitle': 'Ask something about the cluster.',
     'ai.example1': 'Is anything broken right now?',
     'ai.example2': 'How full is the disk on zs-state-01?',
