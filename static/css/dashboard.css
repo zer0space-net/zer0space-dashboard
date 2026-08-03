@@ -349,7 +349,10 @@
 .host.is-offline { opacity: 0.62; }
 
 .host-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.host-name { font-weight: 620; font-size: 0.95rem; letter-spacing: 0.01em; }
+/* The name is the one thing on the card that must never be clipped: min-width
+   lets it shrink below its content width so a long one wraps inside the card
+   instead of shoving the role badge out of it. */
+.host-name { font-weight: 620; font-size: 0.95rem; letter-spacing: 0.01em; min-width: 0; overflow-wrap: anywhere; }
 .host-head .badge { margin-left: auto; }
 
 .metric { display: flex; flex-direction: column; gap: 5px; }

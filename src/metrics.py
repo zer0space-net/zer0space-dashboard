@@ -102,6 +102,11 @@ async def poll_host(hostname: str | None, addr: str | None, label: str | None = 
     in what they report — the frontend renders them with the same card, and a
     difference here would show up as a half-empty card.
     """
+    # Every path that has an address falls back to it, the failures included: a
+    # card for a machine nobody can name is a card nobody can act on, and a
+    # missing name (a node with no Description.Hostname, a half-written
+    # EXTRA_HOSTS entry) is exactly when you need to know which box it is. The
+    # branch below is the one case with nothing to fall back to.
     if not addr:
         return {"hostname": hostname, "label": label, "online": False}
     try:
@@ -128,7 +133,7 @@ async def poll_host(hostname: str | None, addr: str | None, label: str | None = 
         }
     except Exception:  # noqa: BLE001 — unreachable, timed out, or garbage back
         print(f"[metrics] OFFLINE {hostname} ({addr})")
-        return {"hostname": hostname, "label": label, "addr": addr, "online": False}
+        return {"hostname": hostname or addr, "label": label, "addr": addr, "online": False}
 
 
 async def poll_extra_hosts(hosts: list[ExtraHost] | None = None) -> list[dict[str, Any]]:
@@ -168,9 +173,15 @@ async def swarm_snapshot() -> dict[str, Any]:
 
 def node_info(node: dict[str, Any]) -> dict[str, Any]:
     manager_status = node.get("ManagerStatus") or {}
+    # Docker always sets Description.Hostname, but the fallback has to stay
+    # readable when it does not: a full 25-character node ID in a host card is
+    # not an identifier anyone recognises, and it is wide enough to push the
+    # role badge off the monitoring wall's card. Twelve characters is the same
+    # short form Docker itself prints.
+    node_id = node.get("ID") or ""
     return {
         "id": node.get("ID"),
-        "hostname": (node.get("Description") or {}).get("Hostname") or node.get("ID"),
+        "hostname": (node.get("Description") or {}).get("Hostname") or node_id[:12] or None,
         "addr": (node.get("Status") or {}).get("Addr"),
         "state": (node.get("Status") or {}).get("State"),
         "availability": (node.get("Spec") or {}).get("Availability"),
@@ -222,7 +233,10 @@ async def collect(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
 
     cards: list[dict[str, Any]] = []
     for node in nodes:
-        card = metrics_by_host.get(node["hostname"]) or {"hostname": node["hostname"], "online": False}
+        card = metrics_by_host.get(node["hostname"]) or {
+            "hostname": node["hostname"] or node["addr"],
+            "online": False,
+        }
         cards.append(
             {
                 **card,

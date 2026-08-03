@@ -98,6 +98,14 @@
              '<div class="' + barClass(percent) + '"><i style="width:' + w + '%"></i></div></div>';
   }
 
+  /* The card is identified by name on every path, online or not. metrics.py
+     already falls back hostname -> Glances name -> LAN address -> short node
+     id, so this last '?' should be unreachable; it stays as the one case that
+     is worse than an address, not as the expected output. */
+  function name(host) {
+    return host.hostname || host.addr || '?';
+  }
+
   function hostCard(host) {
     var badges = '';
     if (host.label) badges += '<span class="badge">' + esc(host.label) + '</span>';
@@ -106,14 +114,14 @@
     if (!host.online) {
       return '<article class="host is-offline"><div class="host-head">' +
                '<span class="dot" style="color:var(--crit)"></span>' +
-               '<span class="host-name">' + esc(host.hostname || '?') + '</span>' + badges +
+               '<span class="host-name">' + esc(name(host)) + '</span>' + badges +
                '<span class="badge badge-crit">' + esc(t('common.offline')) + '</span></div>' +
                '<p class="host-offline-note">' + esc(t('metric.offline')) + '</p></article>';
     }
     var mem = host.mem || {}, disk = host.disk || {}, net = host.net || {};
     return '<article class="host"><div class="host-head">' +
              '<span class="dot dot-live" style="color:var(--ok)"></span>' +
-             '<span class="host-name">' + esc(host.hostname) + '</span>' + badges + '</div>' +
+             '<span class="host-name">' + esc(name(host)) + '</span>' + badges + '</div>' +
              metric(t('metric.cpu'), host.cpu, UI.percent(host.cpu)) +
              metric(t('metric.ram'), mem.percent, pair(mem.used, mem.total)) +
              metric(t('metric.disk'), disk.percent, pair(disk.used, disk.total)) +
