@@ -79,6 +79,17 @@
     return 'bar';
   }
 
+  /* "12.4/62.8 GB" rather than "12.4 GB / 62.8 GB". A metric column on the wall
+     is around 85px wide (three metrics across a card, three cards across an
+     iPad), and the repeated unit is the first thing that has to go. Falls back
+     to the long form when the two values land on different units. */
+  function pair(used, total) {
+    var a = UI.bytes(used).split(' ');
+    var b = UI.bytes(total).split(' ');
+    if (a.length === 2 && b.length === 2 && a[1] === b[1]) return a[0] + '/' + b[0] + ' ' + b[1];
+    return a.join(' ') + ' / ' + b.join(' ');
+  }
+
   function metric(name, percent, detail) {
     var w = (percent === null || percent === undefined || isNaN(percent)) ? 0 : Math.max(0, Math.min(100, Number(percent)));
     return '<div class="metric"><div class="metric-top">' +
@@ -104,8 +115,8 @@
              '<span class="dot dot-live" style="color:var(--ok)"></span>' +
              '<span class="host-name">' + esc(host.hostname) + '</span>' + badges + '</div>' +
              metric(t('metric.cpu'), host.cpu, UI.percent(host.cpu)) +
-             metric(t('metric.ram'), mem.percent, UI.bytes(mem.used) + ' / ' + UI.bytes(mem.total)) +
-             metric(t('metric.disk'), disk.percent, UI.bytes(disk.used) + ' / ' + UI.bytes(disk.total)) +
+             metric(t('metric.ram'), mem.percent, pair(mem.used, mem.total)) +
+             metric(t('metric.disk'), disk.percent, pair(disk.used, disk.total)) +
              '<div class="host-net"><span>↓ ' + esc(UI.rate(net.rx_rate)) + '</span>' +
              '<span>↑ ' + esc(UI.rate(net.tx_rate)) + '</span></div></article>';
   }

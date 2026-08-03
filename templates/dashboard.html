@@ -37,6 +37,13 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 10.4 12 3.7l8.4 6.7V20a1 1 0 0 1-1 1h-4.6v-6H9.2v6H4.6a1 1 0 0 1-1-1Z"/></svg>
         <span data-i18n="view.home">Übersicht</span>
       </button>
+      <!-- The launcher has its own entry rather than a block on the overview:
+           it grows with every service that gets added, and it was the thing
+           that pushed the cluster numbers below the fold. -->
+      <button type="button" class="nav-item" data-view="services">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.8"/></svg>
+        <span data-i18n="view.services">Dienste</span>
+      </button>
       <button type="button" class="nav-item" data-view="ai">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="7" width="15" height="12" rx="3"/><path d="M12 7V3.8M9 12.5h.01M15 12.5h.01M9.5 16h5"/><path d="M2.4 12.5h2M19.6 12.5h2"/></svg>
         <span data-i18n="view.ai">AI</span>
@@ -115,32 +122,56 @@
       <div class="alert alert-warn banner" id="banner" role="status" hidden></div>
 
       <!-- ============================= HOME ============================= -->
+      {#
+        A summary, not a second monitoring wall. The per-host cards that used to
+        live here are gone: nine of them pushed everything else below the fold,
+        and /monitoring exists precisely to show them. What stays is the
+        aggregate — the same numbers, one line each.
+      #}
       <section class="view is-active" id="view-home">
         <div class="tiles" id="tiles"></div>
 
-        <section class="block">
-          <header class="block-head">
-            <h2 data-i18n="home.swarmNodes">Swarm-Nodes</h2>
-            <span class="faint" id="nodes-caption"></span>
-          </header>
-          <div class="host-grid" id="node-grid"></div>
-        </section>
+        <div class="home-grid">
+          <section class="panel glass home-card">
+            <header class="home-card-head">
+              <h2 data-i18n="home.loadTitle">Cluster-Auslastung</h2>
+              <span class="faint" id="load-caption"></span>
+            </header>
+            <div class="home-card-body" id="load-body"></div>
+          </section>
 
-        <section class="block" id="extra-block" hidden>
-          <header class="block-head">
-            <h2 data-i18n="home.standalone">Standalone-Hosts</h2>
-            <span class="faint" data-i18n="home.standaloneHint">Bewusst außerhalb des Clusters</span>
-          </header>
-          <div class="host-grid" id="extra-grid"></div>
-        </section>
+          <section class="panel glass home-card">
+            <header class="home-card-head">
+              <h2 data-i18n="home.swarmTitle">Swarm-Dienste</h2>
+              <span class="faint" id="swarm-caption"></span>
+            </header>
+            <div class="home-card-body" id="swarm-body"></div>
+          </section>
 
-        <section class="block">
-          <header class="block-head">
-            <h2 data-i18n="home.services">Dienste</h2>
-            <span class="faint" id="services-caption"></span>
-          </header>
-          <div class="service-grid" id="service-grid"></div>
-        </section>
+          <section class="panel glass home-card">
+            <header class="home-card-head">
+              <h2 data-i18n="home.backupTitle">Backups</h2>
+              <span class="faint" id="backup-caption"></span>
+            </header>
+            <div class="home-card-body" id="backup-body"></div>
+          </section>
+
+          <section class="panel glass home-card">
+            <header class="home-card-head">
+              <h2 data-i18n="home.mayTitle">May</h2>
+            </header>
+            <div class="home-card-body" id="may-body"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- =========================== SERVICES =========================== -->
+      <section class="view" id="view-services">
+        <header class="block-head">
+          <h2 data-i18n="home.services">Dienste</h2>
+          <span class="faint" id="services-caption"></span>
+        </header>
+        <div class="service-grid" id="service-grid"></div>
       </section>
 
       <!-- ============================== AI ============================== -->

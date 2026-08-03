@@ -1,19 +1,24 @@
 /* ==========================================================================
    Monitoring wall — an always-on, glanceable view for a tablet or a screen on
-   the shelf. Bigger type, more air, one screen you never interact with.
+   the shelf. One screen you never interact with, and never scroll: the whole
+   cluster has to be on it at once on a 1024x768 iPad in landscape, which is
+   the constraint every size in this file is set by.
+
    Reuses .tile / .host / .metric / .bar from dashboard.css; this file is the
-   shell and the size overrides.
+   shell, the compact host layout and the size overrides. Scrolling stays
+   enabled as a fallback — a cluster that outgrows the screen must degrade to a
+   scrollbar, not to content that is silently cut off.
    ========================================================================== */
 
 .page-monitoring { overflow-y: auto; }
 
 .wall {
-  width: min(100% - 40px, 1600px);
+  width: min(100% - 32px, 1600px);
   margin-inline: auto;
-  padding: clamp(16px, 2.5vw, 30px) 0 60px;
+  padding: clamp(12px, 1.8vw, 22px) 0 clamp(16px, 2vw, 28px);
   display: flex;
   flex-direction: column;
-  gap: clamp(18px, 2.5vw, 30px);
+  gap: clamp(11px, 1.5vw, 20px);
 }
 
 /* --- Header -------------------------------------------------------------- */
@@ -21,22 +26,21 @@
 .wall-head {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
-  padding-bottom: 4px;
 }
 
-.wall-brand { display: flex; align-items: center; gap: 14px; }
-.wall-sep { width: 1px; height: 22px; background: var(--border-strong); }
+.wall-brand { display: flex; align-items: center; gap: 12px; }
+.wall-sep { width: 1px; height: 20px; background: var(--border-strong); }
 .wall-heading {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   letter-spacing: 0.28em;
   text-transform: uppercase;
   color: var(--accent);
   font-weight: 650;
 }
 
-.wall-status { display: flex; align-items: center; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+.wall-status { display: flex; align-items: center; gap: 12px; margin-left: auto; flex-wrap: wrap; }
 
 /* The one-word verdict at the top: green when everything is fine, and the whole
    pill picks up the state colour so it reads across the room. */
@@ -44,10 +48,10 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 5px 13px;
   border-radius: var(--radius-pill);
   font-weight: 620;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   border: 1px solid var(--wall-color, var(--border-strong));
   color: var(--wall-color, var(--text));
   background: color-mix(in srgb, var(--wall-color, transparent) 12%, transparent);
@@ -58,8 +62,8 @@
 .wall-overall[data-state="unknown"]  { --wall-color: var(--unknown); }
 .wall-overall .dot { box-shadow: none; }
 
-.wall-clock { font-size: 1.05rem; font-weight: 600; letter-spacing: 0.04em; }
-.wall-updated { font-size: 0.76rem; }
+.wall-clock { font-size: 1rem; font-weight: 600; letter-spacing: 0.04em; }
+.wall-updated { font-size: 0.74rem; }
 
 .wall-banner { margin: 0; }
 .wall-banner[hidden] { display: none; }
@@ -68,19 +72,19 @@
 
 .wall-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: clamp(12px, 1.6vw, 18px);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: clamp(10px, 1.2vw, 14px);
 }
-.wall-tiles .tile { padding: 20px 22px 22px; }
-.wall-tiles .tile-value { font-size: clamp(1.9rem, 3vw, 2.6rem); }
-.wall-tiles .tile-label { font-size: 0.76rem; }
-.wall-tiles .tile-detail { font-size: 0.86rem; }
+.wall-tiles .tile { padding: 12px 15px 13px; gap: 5px; }
+.wall-tiles .tile-value { font-size: clamp(1.35rem, 2.2vw, 1.9rem); }
+.wall-tiles .tile-label { font-size: 0.68rem; letter-spacing: 0.1em; }
+.wall-tiles .tile-detail { font-size: 0.78rem; }
 
 /* --- Sections & hosts ---------------------------------------------------- */
 
-.wall-section { display: flex; flex-direction: column; gap: 14px; }
+.wall-section { display: flex; flex-direction: column; gap: 9px; }
 .wall-label {
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -89,44 +93,83 @@
 
 .wall-hosts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: clamp(12px, 1.6vw, 18px);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: clamp(10px, 1.2vw, 14px);
 }
-.wall-hosts .host { padding: 20px 22px 22px; gap: 15px; }
-.wall-hosts .host-name { font-size: 1.05rem; }
-.wall-hosts .metric-name { font-size: 0.72rem; }
-.wall-hosts .metric-val { font-size: 0.82rem; }
-.wall-hosts .bar { height: 7px; }
-.wall-hosts .host-net { font-size: 0.8rem; }
+
+/* The three metrics sit side by side rather than stacked. Stacked, a host card
+   is ~190px tall: three rows of nodes plus the tiles already overflow a 768px
+   screen and the standalone hosts never make it into view. In a row the same
+   card is ~110px and the whole cluster clears the fold. */
+.wall-hosts .host {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  gap: 9px 13px;
+  padding: 12px 14px 13px;
+}
+.wall-hosts .host-head,
+.wall-hosts .host-net,
+.wall-hosts .host-offline-note { grid-column: 1 / -1; }
+.wall-hosts .host-name { font-size: 0.93rem; }
+.wall-hosts .host-head .badge { font-size: 0.64rem; }
+
+.wall-hosts .metric { gap: 4px; }
+/* Name over value instead of beside it: a metric column is ~85px wide at three
+   cards across, which is not enough for both on one line. */
+.wall-hosts .metric-top { flex-direction: column; align-items: flex-start; gap: 0; }
+.wall-hosts .metric-name { font-size: 0.62rem; letter-spacing: 0.05em; }
+.wall-hosts .metric-val { margin-left: 0; font-size: 0.72rem; }
+.wall-hosts .bar { height: 5px; }
+.wall-hosts .host-net { font-size: 0.72rem; gap: 16px; padding-top: 8px; }
+.wall-hosts .host-offline-note { font-size: 0.78rem; padding: 2px 0; }
 
 /* --- Responsive ---------------------------------------------------------- */
+
+/* Five tiles on one row from the width an iPad in landscape gives us — the
+   headline numbers belong on a single line or they stop being a headline. */
+@media (min-width: 900px) {
+  .wall-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* A landscape iPad is 1024x768 and the browser chrome takes a bite out of that.
+   Below this height the wall gives up the last of its air rather than handing
+   out a scrollbar: everything this screen exists to show has to be visible at
+   once, and the fullscreen button is not something a kiosk gets pressed for. */
+@media (min-width: 900px) and (max-height: 860px) {
+  .wall { padding-block: 10px 12px; gap: 9px; }
+  .wall-head { gap: 10px; }
+  .wall-tiles { gap: 10px; }
+  .wall-tiles .tile { padding: 9px 13px 10px; gap: 3px; }
+  .wall-tiles .tile-value { font-size: 1.3rem; }
+  .wall-tiles .tile-detail { font-size: 0.73rem; }
+  .wall-section { gap: 6px; }
+  .wall-hosts { gap: 9px; }
+  .wall-hosts .host { padding: 8px 12px 9px; gap: 6px 12px; }
+  /* The leading is the last 15px per card, and three rows of cards is where
+     the wall either clears an iPad's toolbars or does not. */
+  .wall-hosts .host-head,
+  .wall-hosts .metric-name,
+  .wall-hosts .metric-val,
+  .wall-hosts .host-net { line-height: 1.25; }
+  .wall-hosts .host-net { padding-top: 5px; }
+}
 
 @media (max-width: 768px) {
   .wall {
     width: calc(100% - 24px);
-    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
   }
-  .wall-head { gap: 12px; }
   .wall-status { width: 100%; gap: 10px; }
   .wall-clock { margin-left: auto; }
   /* The wall is read at a distance on a screen and up close on a phone; the
      phone is the case where the type can come down and the tiles can stop
      pretending they have a 4:3 panel to fill. */
-  .wall-tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
-  .wall-tiles .tile { padding: 14px 15px 16px; }
-  .wall-tiles .tile-value { font-size: 1.5rem; }
+  .wall-tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); }
+  .wall-tiles .tile-value { font-size: 1.4rem; }
   .wall-hosts { grid-template-columns: 1fr; }
-  .wall-hosts .host { padding: 16px 17px 18px; }
 }
 
 @media (max-width: 400px) {
   .wall-tiles { grid-template-columns: 1fr; }
-}
-
-/* On a real wall/tablet the screen is often left untouched for hours — respect
-   reduced motion by dropping the live-dot pulse there too (handled globally in
-   main.css), and keep the layout dense enough to fit a 4:3 iPad without scroll
-   for a typical 7–9 node cluster. */
-@media (min-width: 1100px) {
-  .wall-tiles { grid-template-columns: repeat(5, 1fr); }
 }

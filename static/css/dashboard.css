@@ -216,6 +216,115 @@
 .tile-value small { font-size: 0.95rem; font-weight: 480; color: var(--text-faint); margin-left: 2px; }
 .tile-detail { font-size: 0.79rem; color: var(--text-dim); }
 
+/* --- Overview cards ------------------------------------------------------ */
+
+/* The overview is a summary, so it is sized to be read in one look rather than
+   scrolled: the five tiles come down a size, and the three cards below them sit
+   side by side on a desktop and two up on a tablet. The per-host cards that
+   used to fill this view live on /monitoring now. */
+
+#view-home .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+#view-home .tile { padding: 12px 14px 13px; gap: 5px; }
+#view-home .tile-value { font-size: 1.3rem; }
+#view-home .tile-value small { font-size: 0.85rem; }
+#view-home .tile-label { font-size: 0.66rem; letter-spacing: 0.1em; }
+#view-home .tile-detail { font-size: 0.73rem; }
+
+/* A band of equal-height cards, not a full-height stretch: four cards pulled
+   over 700px of screen are hollow boxes, and the overview is meant to end
+   where the information ends. The row floor keeps them from collapsing to
+   four different heights. */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-auto-rows: minmax(196px, auto);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.home-card { display: flex; flex-direction: column; }
+
+.home-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 16px 11px;
+}
+.home-card-head h2 { font-size: 0.95rem; }
+.home-card-head .faint { font-size: 0.74rem; margin-left: auto; white-space: nowrap; }
+
+/* flex:1 so the body takes the card's slack — that is what lets the closing
+   line below sit on the bottom edge rather than under the last paragraph. */
+.home-card-body {
+  flex: 1;
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+/* The closing line of a card is pinned to the bottom, so cards of unequal
+   content still line up along their last row. */
+.home-card-body > .host-net,
+.home-card-body > .home-note.faint:last-child { margin-top: auto; }
+.home-card-body .empty { padding: 14px 0; text-align: left; }
+
+/* The one big number per card. */
+.home-figure { display: flex; align-items: baseline; gap: 9px; }
+.home-figure strong { font-size: 1.5rem; font-weight: 640; letter-spacing: -0.02em; line-height: 1.1; }
+.home-figure strong small { font-size: 0.9rem; font-weight: 480; color: var(--text-faint); }
+.home-figure span {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 620;
+}
+
+/* Only the services that are NOT running at their desired scale get a chip.
+   Listing all of them would be the service table again, one view too early. */
+.home-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.home-chip {
+  font-size: 0.73rem;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-dim);
+}
+.home-chip b { font-family: var(--font-mono); font-weight: 650; }
+.home-chip.is-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 36%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.home-chip.is-crit {
+  color: var(--crit);
+  border-color: color-mix(in srgb, var(--crit) 36%, transparent);
+  background: color-mix(in srgb, var(--crit) 10%, transparent);
+}
+
+.home-note { font-size: 0.8rem; line-height: 1.5; color: var(--text-dim); margin: 0; }
+.home-note.is-ok { color: var(--ok); }
+/* main.css loads first, so .faint alone loses the tie on source order here. */
+.home-note.faint { font-size: 0.76rem; color: var(--text-faint); }
+
+.home-facts { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; margin: 0; font-size: 0.79rem; }
+.home-facts dt { color: var(--text-faint); }
+.home-facts dd { margin: 0; text-align: right; color: var(--text-dim); }
+
+.may-say { display: flex; align-items: center; gap: 12px; }
+.may-face {
+  width: 46px; height: 46px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--accent-line);
+}
+.may-line { margin: 0; font-size: 0.86rem; line-height: 1.5; }
+.may-line[data-state="warning"] { color: var(--warn); }
+.may-line[data-state="critical"] { color: var(--crit); }
+.may-line[data-state="unknown"] { color: var(--text-faint); }
+
 /* --- Host cards ---------------------------------------------------------- */
 
 .host-grid {
@@ -598,6 +707,14 @@
   .host-grid, .service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tab-pane[data-pane="security"] { grid-template-columns: 1fr; }
 
+  /* Five fixed columns stop fitting once the drawer width is gone; let them
+     wrap. Restated under #view-home because the id beats the plain .tiles
+     rules further down. */
+  #view-home .tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  /* Two by two rather than the three-plus-one an auto-fit gives at this width:
+     four cards, one left over on its own row, reads as a mistake. */
+  .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
   /* dashboard.css redefines .btn-icon at 36 px and loads after main.css, so the
      44 px rule there loses on source order at equal specificity. The drawer
      button and the sidebar's own control are the two most-used targets on a
@@ -641,8 +758,11 @@
   /* min() so the track can never be wider than the container: at 320 px a bare
      minmax(150px, 1fr) would overflow rather than fall back to one column. */
   .tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; }
+  #view-home .tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; }
   .tile { padding: 14px 15px 15px; }
   .tile-value { font-size: 1.4rem; }
+
+  .home-grid { grid-template-columns: 1fr; margin-top: 12px; }
 
   .block { margin-top: 24px; }
   .panel-head { flex-wrap: wrap; padding: 16px; }
@@ -685,7 +805,7 @@
 }
 
 @media (max-width: 400px) {
-  .tiles { grid-template-columns: 1fr; }
+  .tiles, #view-home .tiles { grid-template-columns: 1fr; }
 }
 
 /* --- AI assistant --------------------------------------------------------- */

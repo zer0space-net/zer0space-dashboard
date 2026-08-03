@@ -45,8 +45,10 @@
   function $(id) { return document.getElementById(id); }
 
   function cacheElements() {
-    ['tiles', 'node-grid', 'extra-grid', 'extra-block', 'service-grid', 'ai-grid', 'cloud-grid',
-     'nodes-caption', 'services-caption', 'view-title', 'greeting', 'banner', 'who-name',
+    ['tiles', 'load-body', 'load-caption', 'swarm-body', 'swarm-caption',
+     'backup-body', 'backup-caption', 'may-body',
+     'service-grid', 'ai-grid', 'cloud-grid',
+     'services-caption', 'view-title', 'greeting', 'banner', 'who-name',
      'who-role', 'vault-list', 'vault-search', 'invite-rows', 'user-rows', 'service-rows',
      'audit-rows', 'audit-summary', 'swatches', 'accent-custom', 'accent-value', 'chibi-enabled',
      'loading-overlay', 'invite-fresh', 'invite-code', 'invite-meta',
@@ -71,7 +73,7 @@
 
   /* --- Navigation -------------------------------------------------------- */
 
-  var VIEWS = ['home', 'ai', 'cloud', 'vault', 'settings'];
+  var VIEWS = ['home', 'services', 'ai', 'cloud', 'vault', 'settings'];
 
   function setView(name) {
     if (VIEWS.indexOf(name) === -1) name = 'home';
@@ -249,7 +251,7 @@
     ].join('');
   }
 
-  /* --- Host cards -------------------------------------------------------- */
+  /* --- Overview cards ----------------------------------------------------- */
 
   function barClass(percent) {
     if (percent === null || percent === undefined) return 'bar';
@@ -272,62 +274,200 @@
            '</div>';
   }
 
-  function hostCard(host) {
-    var badges = '';
-    if (host.label) badges += '<span class="badge">' + esc(host.label) + '</span>';
-    if (host.role === 'manager') badges += '<span class="badge badge-accent">' + (host.isLeader ? 'Leader' : 'Manager') + '</span>';
-
-    if (!host.online) {
-      return '<article class="host is-offline">' +
-               '<div class="host-head">' +
-                 '<span class="dot" style="color:var(--crit)"></span>' +
-                 '<span class="host-name">' + esc(host.hostname || '?') + '</span>' +
-                 badges +
-                 '<span class="badge badge-crit">' + esc(t('common.offline')) + '</span>' +
-               '</div>' +
-               '<p class="host-offline-note">' + esc(t('metric.offline')) + '</p>' +
-             '</article>';
-    }
-
-    var mem = host.mem || {};
-    var disk = host.disk || {};
-    var net = host.net || {};
-
-    return '<article class="host">' +
-             '<div class="host-head">' +
-               '<span class="dot dot-live" style="color:var(--ok)"></span>' +
-               '<span class="host-name">' + esc(host.hostname) + '</span>' +
-               badges +
-             '</div>' +
-             metric(t('metric.cpu'), host.cpu, UI.percent(host.cpu)) +
-             metric(t('metric.ram'), mem.percent, UI.bytes(mem.used) + ' / ' + UI.bytes(mem.total)) +
-             metric(t('metric.disk'), disk.percent, UI.bytes(disk.used) + ' / ' + UI.bytes(disk.total)) +
-             '<div class="host-net">' +
-               '<span>↓ ' + esc(UI.rate(net.rx_rate)) + '</span>' +
-               '<span>↑ ' + esc(UI.rate(net.tx_rate)) + '</span>' +
-             '</div>' +
-           '</article>';
+  /* Swarm members and standalone hosts folded into one list. The two are kept
+     apart everywhere else on purpose — a standalone host is not a Swarm node —
+     but "how loaded is the hardware" is a question about all of it. */
+  function allHosts() {
+    var data = state.overview;
+    if (!data) return [];
+    return (data.nodes || []).concat(data.extraHosts || []);
   }
 
-  function renderHosts() {
-    var data = state.overview;
-    if (!data || !el['node-grid']) return;
+  /* CPU is averaged, everything else is summed: a mean of nine percentages is
+     the honest answer for load, while a mean of nine disk percentages would
+     hide a full 200 GB disk behind eight empty 4 TB ones. */
+  function aggregate(hosts) {
+    var out = { cpu: null, memUsed: 0, memTotal: 0, diskUsed: 0, diskTotal: 0, rx: 0, tx: 0 };
+    var cpuSum = 0, cpuCount = 0;
+    hosts.forEach(function (host) {
+      var mem = host.mem || {}, disk = host.disk || {}, net = host.net || {};
+      if (typeof host.cpu === 'number' && !isNaN(host.cpu)) { cpuSum += host.cpu; cpuCount += 1; }
+      out.memUsed += Number(mem.used) || 0;
+      out.memTotal += Number(mem.total) || 0;
+      out.diskUsed += Number(disk.used) || 0;
+      out.diskTotal += Number(disk.total) || 0;
+      out.rx += Number(net.rx_rate) || 0;
+      out.tx += Number(net.tx_rate) || 0;
+    });
+    if (cpuCount) out.cpu = cpuSum / cpuCount;
+    out.memPercent = out.memTotal ? (out.memUsed / out.memTotal) * 100 : null;
+    out.diskPercent = out.diskTotal ? (out.diskUsed / out.diskTotal) * 100 : null;
+    return out;
+  }
 
-    var nodes = data.nodes || [];
-    el['node-grid'].innerHTML = nodes.length
-      ? nodes.map(hostCard).join('')
-      : '<p class="empty">' + esc(t('home.noNodes')) + '</p>';
+  function renderLoad() {
+    if (!el['load-body']) return;
+    var hosts = allHosts();
+    var online = hosts.filter(function (h) { return h.online; });
+    var agg = aggregate(online);
 
-    if (el['nodes-caption']) {
-      el['nodes-caption'].textContent = t('home.nodesCaption', {
-        online: nodes.filter(function (n) { return n.online; }).length,
-        total: nodes.length
+    el['load-body'].innerHTML =
+      metric(t('metric.cpu'), agg.cpu, UI.percent(agg.cpu)) +
+      metric(t('metric.ram'), agg.memPercent, UI.bytes(agg.memUsed) + ' / ' + UI.bytes(agg.memTotal)) +
+      metric(t('metric.disk'), agg.diskPercent, UI.bytes(agg.diskUsed) + ' / ' + UI.bytes(agg.diskTotal)) +
+      '<div class="host-net">' +
+        '<span>↓ ' + esc(UI.rate(agg.rx)) + '</span>' +
+        '<span>↑ ' + esc(UI.rate(agg.tx)) + '</span>' +
+      '</div>';
+
+    if (el['load-caption']) {
+      el['load-caption'].textContent = t('home.nodesCaption', {
+        online: online.length,
+        total: hosts.length
       });
     }
+  }
 
-    var extra = data.extraHosts || [];
-    if (el['extra-block']) el['extra-block'].hidden = extra.length === 0;
-    if (el['extra-grid']) el['extra-grid'].innerHTML = extra.map(hostCard).join('');
+  function renderSwarm() {
+    if (!el['swarm-body']) return;
+    var swarm = state.overview && state.overview.swarm;
+
+    if (!swarm) {
+      el['swarm-body'].innerHTML = '<p class="empty">' + esc(t('home.noSwarm')) + '</p>';
+      if (el['swarm-caption']) el['swarm-caption'].textContent = '';
+      return;
+    }
+
+    var services = swarm.services || [];
+    var running = 0, desired = 0;
+    services.forEach(function (s) {
+      running += Number(s.running) || 0;
+      desired += Number(s.desired) || 0;
+    });
+    var degraded = services.filter(function (s) { return (s.running || 0) < (s.desired || 0); });
+    // Replica health reads the other way round from a load bar: full is good,
+    // so barClass() (which warns as it fills) is deliberately not used here.
+    var width = desired ? Math.max(0, Math.min(100, (running / desired) * 100)) : 100;
+
+    var detail = degraded.length
+      ? '<div class="home-chips">' + degraded.map(function (s) {
+          return '<span class="home-chip is-warn">' + esc(s.name) +
+                 ' <b>' + esc(s.running) + '/' + esc(s.desired) + '</b></span>';
+        }).join('') + '</div>'
+      : '<p class="home-note is-ok">' + esc(t('home.allHealthy')) + '</p>';
+
+    el['swarm-body'].innerHTML =
+      '<div class="home-figure">' +
+        '<strong>' + esc(running) + '<small>/' + esc(desired) + '</small></strong>' +
+        '<span>' + esc(t('home.replicas')) + '</span>' +
+      '</div>' +
+      '<div class="bar' + (degraded.length ? ' is-warn' : '') + '"><i style="width:' + width + '%"></i></div>' +
+      detail;
+
+    if (el['swarm-caption']) {
+      el['swarm-caption'].textContent = t('home.swarmCaption', { count: services.length });
+    }
+  }
+
+  /* Counts only, no per-node rows. `display_status` is added server-side and is
+     the one field on a backup drop this code can rely on: the rest of the JSON
+     is whatever the backup shell script chose to write, and guessing at a
+     hostname key here would break the first time that script is edited. */
+  function renderBackup() {
+    if (!el['backup-body']) return;
+    var backup = state.overview && state.overview.backup;
+    var nodes = (backup && backup.nodes) || [];
+
+    if (el['backup-caption']) {
+      el['backup-caption'].textContent = backup && backup.most_recent
+        ? UI.relative(backup.most_recent)
+        : '';
+    }
+
+    if (!nodes.length) {
+      el['backup-body'].innerHTML = '<p class="empty">' + esc(t('tile.backupNever')) + '</p>';
+      return;
+    }
+
+    var counts = { ok: 0, stale: 0, failed: 0 };
+    nodes.forEach(function (entry) {
+      if (counts[entry.display_status] !== undefined) counts[entry.display_status] += 1;
+    });
+    var behind = counts.stale + counts.failed;
+    var width = (counts.ok / nodes.length) * 100;
+
+    var detail = behind
+      ? '<div class="home-chips">' +
+          (counts.stale ? '<span class="home-chip is-warn">' + esc(t('backup.stale')) + ' <b>' + counts.stale + '</b></span>' : '') +
+          (counts.failed ? '<span class="home-chip is-crit">' + esc(t('backup.failed')) + ' <b>' + counts.failed + '</b></span>' : '') +
+        '</div>'
+      : '<p class="home-note is-ok">' + esc(t('home.backupsFresh')) + '</p>';
+
+    el['backup-body'].innerHTML =
+      '<div class="home-figure">' +
+        '<strong>' + counts.ok + '<small>/' + nodes.length + '</small></strong>' +
+        '<span>' + esc(t('home.backupNodes')) + '</span>' +
+      '</div>' +
+      '<div class="bar' + (counts.failed ? ' is-crit' : behind ? ' is-warn' : '') + '">' +
+        '<i style="width:' + width + '%"></i></div>' +
+      detail;
+  }
+
+  /* The single worst tile state, reused as May's mood. Same ordering the
+     monitoring wall uses for its one-word verdict. */
+  function worstState() {
+    var tiles = state.overview && state.overview.tiles;
+    if (!tiles) return 'unknown';
+    var order = { critical: 3, warning: 2, unknown: 1, healthy: 0 };
+    var worst = 'healthy';
+    ['nodes', 'services', 'cluster', 'infrastructure', 'backup'].forEach(function (key) {
+      var s = tiles[key] && tiles[key].state;
+      if ((order[s] || 0) > (order[worst] || 0)) worst = s;
+    });
+    return worst;
+  }
+
+  function fact(label, value) {
+    return '<dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd>';
+  }
+
+  /* May says what the numbers already say, in one sentence. Decorative, but it
+     is the line that gets read first, so it is derived from the real state
+     rather than picked at random. */
+  function renderMay() {
+    if (!el['may-body']) return;
+    var data = state.overview;
+    var swarm = data && data.swarm;
+    var mood = worstState();
+
+    var pair = function (a, b) { return a + ' / ' + b; };
+    var readyLine = swarm ? pair(swarm.nodesReady, swarm.nodesTotal) : '—';
+    var managerLine = swarm ? pair(swarm.managersReachable, swarm.managersTotal) : '—';
+    var extra = (data && data.extraHosts) || [];
+    var extraLine = extra.length
+      ? pair(extra.filter(function (h) { return h.online; }).length, extra.length)
+      : '—';
+
+    el['may-body'].innerHTML =
+      '<div class="may-say">' +
+        '<img class="may-face" src="/static/img/may-avatar.jpg" alt="" width="420" height="420">' +
+        '<p class="may-line" data-state="' + esc(mood) + '">' + esc(t('may.' + mood)) + '</p>' +
+      '</div>' +
+      '<dl class="home-facts">' +
+        fact(t('home.factNodes'), readyLine) +
+        fact(t('home.factManagers'), managerLine) +
+        fact(t('home.factStandalone'), extraLine) +
+        fact(t('home.factServices'), String(state.services.length)) +
+      '</dl>' +
+      '<p class="home-note faint">' + esc(t('home.mayNote')) + '</p>';
+  }
+
+  function renderHome() {
+    if (!state.overview) return;
+    renderLoad();
+    renderSwarm();
+    renderBackup();
+    renderMay();
   }
 
   /* --- Services ---------------------------------------------------------- */
@@ -1088,7 +1228,7 @@
     try {
       state.overview = await API.get('/api/overview');
       renderTiles();
-      renderHosts();
+      renderHome();
       banner(state.overview.error ? t('err.' + state.overview.error) : null, 'warn');
     } catch (err) {
       banner(err.message, 'error');
@@ -1099,6 +1239,9 @@
     try {
       state.services = await API.get('/api/services');
       renderServices();
+      // May's fact list counts the launcher entries, and the two lists load
+      // independently — whichever finishes last has to redraw her.
+      renderMay();
     } catch (err) { banner(err.message, 'error'); }
   }
 
@@ -1176,7 +1319,7 @@
     if (el['who-role'] && state.me) el['who-role'].textContent = t('role.' + state.me.role);
     renderGreeting();
     renderTiles();
-    renderHosts();
+    renderHome();
     renderServices();
     renderVault();
     renderInvites();
