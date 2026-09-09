@@ -554,12 +554,87 @@ if config.CRIMSON_ENABLED:
             return None
         return str(session["user_id"])
 
+    # A media relay may also be reached with a signed ``?zt=`` token instead of
+    # the session cookie — see crimson.mint_airplay_token. That is what makes
+    # AirPlay work: the Apple TV fetches the playlist and segments itself and has
+    # no cookie, so a cookie-only gate leaves it with a black screen.
+    def _crimson_media_user(request: Request) -> str | None:
+        user = _crimson_user(request)
+        if user is not None:
+            return user
+        token = request.query_params.get(crimson.AIRPLAY_PARAM)
+        if not token:
+            return None
+        try:
+            secret = session_secret.require()
+        except RuntimeError:
+            return None
+        return crimson.airplay_user(secret, token)
+
+    # itsdangerous emits URL-safe base64 with dots; anything else is not a token
+    # this gateway minted. Checked because the value is written verbatim into the
+    # playlist body the player gets back, and a token full of newlines would let
+    # a crafted link inject playlist lines into its own response.
+    _AIRPLAY_TOKEN_OK = re.compile(r"^[A-Za-z0-9._~-]{1,512}$")
+
+    def _airplay_token(request: Request) -> str | None:
+        """The token to carry into a playlist's sub-resources, if this is such a
+        request. Absent on ordinary in-page playback, so nothing changes there."""
+        token = request.query_params.get(crimson.AIRPLAY_PARAM)
+        if not token or not _AIRPLAY_TOKEN_OK.match(token):
+            return None
+        return token
+
+    # ``/voe_proxy``, ``/kinoger_proxy/…`` — the backend's own same-origin media
+    # relays, whether reached under the /crimson/api mount or at the root.
+    _MEDIA_RELAY_PATH = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}_proxy(/.*)?$", re.IGNORECASE)
+
+    @app.get("/crimson/airplay-token", include_in_schema=False)
+    async def crimson_airplay_token(request: Request) -> Response:
+        """Mint this viewer a short-lived media-relay token for AirPlay.
+
+        Session-gated like everything else under /crimson; the token it returns
+        is what the player appends to a stream URL so the receiver — which never
+        sees the session cookie — can fetch the playlist and segments itself.
+        """
+        user = _crimson_user(request)
+        if user is None:
+            return fail(401, "UNAUTHORIZED", "Sign in to zer0space to use Crimson")
+        try:
+            secret = session_secret.require()
+        except RuntimeError:
+            return fail(503, "CRIMSON_NO_SECRET", "Session secret not ready")
+        return JSONResponse(
+            {
+                "token": crimson.mint_airplay_token(secret, user),
+                "param": crimson.AIRPLAY_PARAM,
+                "expires_in": crimson.AIRPLAY_MAX_AGE,
+            }
+        )
+
     @app.api_route(
         "/crimson/api/{path:path}",
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
         include_in_schema=False,
     )
     async def crimson_api(request: Request, path: str) -> Response:
+        # Media relays first: they are public + HMAC-signed on the backend (no
+        # Bearer to inject), and they are the one path an AirPlay receiver walks
+        # on its own, so they accept a signed ?zt= token in place of the cookie
+        # and get their playlists re-tokened on the way out.
+        if _MEDIA_RELAY_PATH.match(path):
+            user = _crimson_media_user(request)
+            if user is None:
+                return fail(401, "UNAUTHORIZED", "Sign in to zer0space to use Crimson")
+            return await crimson.proxy(
+                request,
+                config.CRIMSON_API_URL,
+                path,
+                inject_user=user,
+                forwarded_prefix="/crimson/api",
+                airplay_token=_airplay_token(request),
+            )
+
         user = _crimson_user(request)
         if user is None:
             return fail(401, "UNAUTHORIZED", "Sign in to zer0space to use Crimson")
@@ -621,11 +696,16 @@ if config.CRIMSON_ENABLED:
         "/{proxy_name}_proxy", methods=["GET", "HEAD", "OPTIONS"], include_in_schema=False
     )
     async def crimson_media_proxy(request: Request, proxy_name: str) -> Response:
-        if _crimson_user(request) is None:
+        if _crimson_media_user(request) is None:
             return fail(401, "UNAUTHORIZED", "Sign in to zer0space to use Crimson")
         if not _RELAY_NAME_OK.match(proxy_name):
             return fail(404, "NOT_FOUND", "Not found")
-        return await crimson.proxy(request, config.CRIMSON_API_URL, f"{proxy_name}_proxy")
+        return await crimson.proxy(
+            request,
+            config.CRIMSON_API_URL,
+            f"{proxy_name}_proxy",
+            airplay_token=_airplay_token(request),
+        )
 
     @app.api_route(
         "/{proxy_name}_proxy/{rest:path}",
@@ -635,12 +715,15 @@ if config.CRIMSON_ENABLED:
     async def crimson_media_proxy_sub(
         request: Request, proxy_name: str, rest: str
     ) -> Response:
-        if _crimson_user(request) is None:
+        if _crimson_media_user(request) is None:
             return fail(401, "UNAUTHORIZED", "Sign in to zer0space to use Crimson")
         if not _RELAY_NAME_OK.match(proxy_name):
             return fail(404, "NOT_FOUND", "Not found")
         return await crimson.proxy(
-            request, config.CRIMSON_API_URL, f"{proxy_name}_proxy/{rest}"
+            request,
+            config.CRIMSON_API_URL,
+            f"{proxy_name}_proxy/{rest}",
+            airplay_token=_airplay_token(request),
         )
 
     @app.get("/crimson", include_in_schema=False)

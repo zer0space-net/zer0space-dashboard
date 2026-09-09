@@ -25,12 +25,14 @@ the small static SPA pass through the dashboard.
 
 from __future__ import annotations
 
+import re
 from typing import AsyncIterator
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from itsdangerous import BadData, URLSafeTimedSerializer
 
 from . import config
 
@@ -120,6 +122,110 @@ _MANAGED_FORWARDED = {
     "x-forwarded-host",
     "x-forwarded-prefix",
 }
+
+
+# --- AirPlay / external-player tokens -----------------------------------------
+#
+# AirPlay in *video* mode does not mirror the phone: Safari hands the stream URL
+# to the receiver, and the Apple TV then fetches the playlist and every segment
+# itself — from a device that has no zer0space session cookie and never can have
+# one. The media relays below are session-gated, so those fetches 401 and the TV
+# stays black; screen mirroring (a letterboxed copy of the phone) is all that is
+# left.
+#
+# A short-lived signed token carried in the URL closes exactly that gap. The SPA
+# asks for one over its own session, appends it to the stream URL it hands the
+# <video> element, and the relay accepts it in place of the cookie. It names one
+# zer0space user, expires after AIRPLAY_MAX_AGE, and unlocks nothing but the
+# media relays — never the API, the SPA, or the dashboard.
+
+AIRPLAY_PARAM = "zt"
+AIRPLAY_MAX_AGE = 6 * 3600
+_AIRPLAY_SALT = "zs.crimson.airplay"
+
+_airplay_cache: tuple[str, URLSafeTimedSerializer] | None = None
+
+
+def _airplay_serializer(secret: str) -> URLSafeTimedSerializer:
+    """Cached serializer, rebuilt if the session secret is rotated under us."""
+    global _airplay_cache
+    if _airplay_cache is None or _airplay_cache[0] != secret:
+        _airplay_cache = (secret, URLSafeTimedSerializer(secret, salt=_AIRPLAY_SALT))
+    return _airplay_cache[1]
+
+
+def mint_airplay_token(secret: str, user_id: str) -> str:
+    return _airplay_serializer(secret).dumps(user_id)
+
+
+def airplay_user(secret: str, token: str | None) -> str | None:
+    """The user a media-relay token names, or None if absent, expired or forged."""
+    if not token:
+        return None
+    try:
+        value = _airplay_serializer(secret).loads(token, max_age=AIRPLAY_MAX_AGE)
+    except BadData:
+        return None
+    return str(value) if value else None
+
+
+# The backend normalises every m3u8 it relays to ``application/vnd.apple.mpegurl``
+# (see the resolvers' ``proxy_fetch``), so matching on the media type never
+# buffers a segment by accident.
+_PLAYLIST_TYPES = ("mpegurl",)
+_URI_ATTR = re.compile(r'URI="([^"]*)"')
+
+
+def _tokenise(url: str, token: str, origin: str) -> str:
+    """Carry the relay token to one playlist sub-resource — same-origin only.
+
+    The backend rewrites every child of a proxied playlist to a ROOT-relative
+    ``/voe_proxy?u=…&s=…``; those are ours to gate, so they get the token. A link
+    that points at a third-party CDN is left alone: appending the token there
+    would hand a capability for this user's relays to someone else's logs.
+    """
+    raw = url.strip()
+    # Anchored on the separator: a bare substring test would also match a param
+    # that merely ends in the token's name.
+    if not raw or f"?{AIRPLAY_PARAM}=" in raw or f"&{AIRPLAY_PARAM}=" in raw:
+        return url
+    lowered = raw.lower()
+    absolute = lowered.startswith(("http://", "https://", "//"))
+    if absolute and not (origin and lowered.startswith(origin.lower() + "/")):
+        return url
+    separator = "&" if "?" in raw else "?"
+    return f"{raw}{separator}{AIRPLAY_PARAM}={token}"
+
+
+def _rewrite_playlist(body: bytes, token: str, origin: str) -> bytes:
+    """Append the relay token to every sub-resource of an HLS playlist.
+
+    Without this only the master playlist would carry one: the receiver resolves
+    the child links itself, hits the gate cookie-less, and the stream dies at the
+    first variant or segment.
+    """
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            out.append(line)
+        elif stripped.startswith("#"):
+            # EXT-X-KEY / EXT-X-MAP / EXT-X-MEDIA / EXT-X-I-FRAME-STREAM-INF all
+            # hide their sub-resource in a URI="…" attribute instead of putting
+            # it on a line of its own.
+            out.append(
+                _URI_ATTR.sub(
+                    lambda m: 'URI="' + _tokenise(m.group(1), token, origin) + '"',
+                    line,
+                )
+            )
+        else:
+            out.append(_tokenise(stripped, token, origin))
+    return ("\n".join(out) + "\n").encode("utf-8")
 
 
 class UnsafePath(ValueError):
@@ -272,6 +378,12 @@ async def open_upstream(
     return await client().send(upstream_req, stream=True)
 
 
+def public_origin(request: Request) -> str:
+    """The scheme://host the player and any AirPlay receiver see us as."""
+    proto, host = _forwarded_origin(request)
+    return f"{proto}://{host}"
+
+
 def stream_response(upstream: httpx.Response) -> StreamingResponse:
     async def stream() -> AsyncIterator[bytes]:
         try:
@@ -287,6 +399,31 @@ def stream_response(upstream: httpx.Response) -> StreamingResponse:
     )
 
 
+async def deliver(
+    upstream: httpx.Response,
+    *,
+    airplay_token: str | None = None,
+    origin: str = "",
+) -> Response:
+    """Stream the upstream reply back — buffering only to re-token a playlist.
+
+    An m3u8 is a few kB and has to be complete before it can be rewritten, so it
+    is the one response read in full; segments keep streaming untouched.
+    """
+    media_type = upstream.headers.get("content-type", "").lower()
+    if airplay_token and any(kind in media_type for kind in _PLAYLIST_TYPES):
+        try:
+            body = await upstream.aread()
+        finally:
+            await upstream.aclose()
+        return Response(
+            _rewrite_playlist(body, airplay_token, origin),
+            status_code=upstream.status_code,
+            headers=_response_headers(upstream),
+        )
+    return stream_response(upstream)
+
+
 async def proxy(
     request: Request,
     base_url: str,
@@ -295,6 +432,7 @@ async def proxy(
     bearer: str | None = None,
     inject_user: str | None = None,
     forwarded_prefix: str | None = None,
+    airplay_token: str | None = None,
 ) -> Response:
     """Forward ``request`` to ``base_url``/``subpath`` and stream the reply back."""
     body = await request.body()
@@ -309,4 +447,6 @@ async def proxy(
         )
     except httpx.RequestError as err:
         return bad_gateway(err)
-    return stream_response(upstream)
+    return await deliver(
+        upstream, airplay_token=airplay_token, origin=public_origin(request)
+    )

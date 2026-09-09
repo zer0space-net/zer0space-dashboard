@@ -2346,6 +2346,30 @@ async def crimson_media_proxy(request: Request, proxy_name: str) -> Response:
           en: 'The links stay HMAC-signed (the backend\'s `PROXY_SECRET`) and are re-verified there; the session gate just keeps the relay signed-in-only.'
         },
 
+        { type: 'h3', de: 'AirPlay: auf den Fernseher statt Bildschirm spiegeln', en: 'AirPlay: to the TV instead of mirroring the screen' },
+        {
+          type: 'p',
+          de: 'Vom iPhone auf den Fernseher ging lange nur **Bildschirmspiegelung** — ein Abbild des Handydisplays im falschen Format. Echtes AirPlay (der Fernseher spielt das Video selbst, in seiner eigenen Auflösung) scheiterte an zwei Dingen, die beide im Code liegen und beide behoben sind.',
+          en: 'From an iPhone to a TV, only **screen mirroring** used to work — a copy of the phone display in the wrong aspect ratio. Real AirPlay (the TV playing the video itself, at its own resolution) failed on two things, both in the code, and both fixed.'
+        },
+        {
+          type: 'p',
+          de: '**1. Das Video kam aus einer MediaSource.** `hls.js` läuft auf iOS 17.1+ über `ManagedMediaSource`, und Safari kann MSE-Wiedergabe nicht als *Video* per AirPlay senden, nur spiegeln. Der Player gibt die m3u8 auf Apple-Geräten deshalb direkt an Safaris eigenen HLS-Stack (`video.src`) — erst dadurch erscheint der AirPlay-Knopf. Andere Browser bleiben bei hls.js; weigert sich Safari bei einer Playlist, fällt genau diese Quelle still auf hls.js zurück.',
+          en: '**1. The video came out of a MediaSource.** `hls.js` runs on `ManagedMediaSource` on iOS 17.1+, and Safari cannot AirPlay MSE playback as *video* — only mirror it. So on Apple devices the player hands the m3u8 to Safari\'s own HLS stack (`video.src`), which is what makes the AirPlay button appear. Other browsers keep using hls.js; if Safari refuses a playlist, that one source falls back to hls.js silently.'
+        },
+        {
+          type: 'p',
+          de: '**2. Der Apple TV hat keine zer0space-Sitzung.** Im AirPlay-Videomodus holt der Empfänger Playlist und Segmente *selbst* — von einem Gerät, das den Session-Cookie nie hat. Die sitzungsgeschützten Medien-Relays antworteten ihm mit 401, der Fernseher blieb schwarz. Das Gateway stellt dafür jetzt ein **kurzlebiges signiertes Token** aus (`GET /crimson/airplay-token`, 6 h, sitzungsgeschützt, pro Benutzer): der Player hängt es an die Stream-URL, die Relays akzeptieren es anstelle des Cookies, und das Gateway trägt es beim Durchreichen in die Kind-Links der Playlist nach.',
+          en: '**2. The Apple TV has no zer0space session.** In AirPlay\'s video mode the receiver fetches the playlist and the segments *itself*, from a device that never carries the session cookie. The session-gated media relays answered it with 401 and the TV stayed black. The gateway now mints a **short-lived signed token** for exactly that (`GET /crimson/airplay-token`, 6 h, session-gated, per user): the player appends it to the stream URL, the relays accept it in place of the cookie, and the gateway carries it into the playlist\'s child links as it passes them back.'
+        },
+        {
+          type: 'note',
+          tone: 'warn',
+          title: { de: 'Was das Token darf — und was nicht', en: 'What the token may do — and may not' },
+          de: 'Es entsperrt **nur** die `/<name>_proxy`-Medien-Relays, nie die API, die SPA oder das Dashboard, es nennt genau einen Benutzer und läuft nach sechs Stunden ab. An fremde CDN-Links wird es nie angehängt — das würde eine Fähigkeit für die eigenen Relays in die Logs eines Dritten schreiben. **iframe-Quellen lassen sich nie per AirPlay senden** (fremder Player, undurchsichtig); der AirPlay-Knopf erscheint nur bei echten HLS-/MP4-Quellen.',
+          en: 'It unlocks **only** the `/<name>_proxy` media relays — never the API, the SPA or the dashboard — names exactly one user, and expires after six hours. It is never appended to a third-party CDN link: that would write a capability for our own relays into someone else\'s logs. **iframe sources can never be AirPlayed** (an opaque third-party player); the AirPlay button only appears for real HLS/MP4 sources.'
+        },
+
         { type: 'h3', de: 'Die eigene CSP für Crimson', en: 'Crimson\'s own CSP' },
         {
           type: 'p',
