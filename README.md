@@ -25,6 +25,9 @@
   optional per-user TOTP two-factor authentication
 - **Password vault** — per-user AES-256-GCM credentials, keyed from the user's own
   password; the server cannot decrypt them without an active session
+- **Gated companion apps** — [Crimson](https://github.com/zer0space-net/zer0space-crimson-client)
+  (streaming) at `/crimson` and [Music](https://github.com/zer0space-net/zer0space-music)
+  at `/music`, both reverse-proxied behind the zer0space session so neither needs a login
 - **German / English** — the whole UI, switchable at any time, on every page
 - **Themes** — six accent presets plus a custom colour, stored per account
 
@@ -118,7 +121,9 @@ environment variable in production.
 | `/setup` | public, once | First-run wizard; seals itself permanently |
 | `/dashboard` | session | The app |
 | `/monitoring` | session | Always-on wall view for a kiosk tablet |
-| `/docs` | session | The handbook: architecture, auth, vault, AI, Crimson, deployment |
+| `/docs` | session | The handbook: architecture, auth, vault, AI, Crimson, Music, deployment |
+| `/crimson` | session | The Crimson streaming app, reverse-proxied (inert unless configured) |
+| `/music` | session | The zer0space Music player, reverse-proxied (inert unless configured) |
 | `/loading` | public | Standalone loading screen |
 | `/maintenance` | public | Maintenance notice (`MAINTENANCE_MODE=true`) |
 | `/healthz` | public | Liveness; deliberately does not touch the database |
@@ -136,11 +141,13 @@ most likely to change:
 | `FORCE_HTTPS` | `false` | HSTS + Secure cookies. Leave off for LAN HTTP |
 | `TRUST_PROXY` | `true` | Read `cf-connecting-ip` for rate limiting |
 | `MAINTENANCE_MODE` | `false` | Serve the maintenance page instead of the app |
+| `MUSIC_URL` | unset | Address of the music service. Unset = `/music` 404s, sidebar entry hidden |
 
 ## Documentation
 
 - [`CLAUDE.md`](CLAUDE.md) — project context, invariants, what breaks easily
 - [`docs/security.md`](docs/security.md) — auth, invites, 2FA, sessions, vault, secrets
+- [`docs/music.md`](docs/music.md) — the Music gateway, and how background playback works on a phone
 - [`docs/design.md`](docs/design.md) — the visual language and where the art comes from
 
 ## Operations

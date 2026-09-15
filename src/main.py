@@ -41,7 +41,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import ai, auth, config, crimson, crimson_sso, db, metrics, totp, vault
+from . import ai, auth, config, crimson, crimson_sso, db, metrics, music, totp, vault
 
 # Bump when static assets change in a way browsers must not keep. Templates
 # append it to every CSS/JS URL, which is what makes it safe to serve them with
@@ -146,6 +146,8 @@ def page(request: Request, name: str, **context: Any) -> Response:
             "status_url": config.STATUS_URL,
             # Show the Crimson entry in the sidebar only when the gateway is wired.
             "crimson_enabled": config.CRIMSON_ENABLED,
+            # Show the Music entry in the sidebar only when its gateway is wired.
+            "music_enabled": config.MUSIC_ENABLED,
             # Show the AI chat panel only when the gateway is wired. The panel is
             # useless without it, and an empty view is worse than no view.
             "ai_enabled": config.AI_ENABLED,
@@ -245,10 +247,11 @@ class BodyLimitMiddleware:
         self.proxy_max_bytes = proxy_max_bytes
 
     def _limit_for(self, path: str) -> int:
-        # The Crimson gateway forwards uploads and POST bodies for a third-party
-        # API, so it gets its own, looser ceiling rather than the API's.
-        if path == config.CRIMSON_PATH or path.startswith(config.CRIMSON_PATH + "/"):
-            return self.proxy_max_bytes
+        # The Crimson and Music gateways forward POST bodies for a third-party
+        # API, so they get their own, looser ceiling rather than the API's.
+        for prefix in (config.CRIMSON_PATH, config.MUSIC_PATH):
+            if path == prefix or path.startswith(prefix + "/"):
+                return self.proxy_max_bytes
         return self.max_bytes
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
@@ -303,15 +306,19 @@ class CsrfMiddleware:
 
         request = Request(scope)
         path = request.url.path
-        # The /crimson gateway is exempt from the dashboard's double-submit CSRF:
-        # the Crimson SPA authenticates to its backend by its own scheme and has
-        # no zer0space CSRF token to echo. Cross-site POSTs are still blocked the
-        # same way the login endpoints are — the session cookie is samesite=strict.
-        is_crimson = path == config.CRIMSON_PATH or path.startswith(config.CRIMSON_PATH + "/")
+        # The /crimson and /music gateways are exempt from the dashboard's
+        # double-submit CSRF: both proxied apps authenticate to their backend by
+        # their own scheme and have no zer0space CSRF token to echo. Cross-site
+        # POSTs are still blocked the same way the login endpoints are — the
+        # session cookie is samesite=strict.
+        is_proxied = any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in (config.CRIMSON_PATH, config.MUSIC_PATH)
+        )
         if (
             request.method not in auth.CSRF_SAFE_METHODS
             and path not in self.EXEMPT
-            and not is_crimson
+            and not is_proxied
         ):
             session = scope.get("state", {}).get("session")
             if not auth.csrf_ok(session, request.headers.get("x-csrf-token")):
@@ -491,6 +498,9 @@ async def lifespan(app: FastAPI):
             f"[crimson] gateway on {config.CRIMSON_PATH} "
             f"(spa={config.CRIMSON_CLIENT_URL}, api={config.CRIMSON_API_URL}, sso={sso})"
         )
+    if config.MUSIC_ENABLED:
+        token = "token set" if config.MUSIC_SERVICE_TOKEN else "NO SERVICE TOKEN"
+        print(f"[music] gateway on {config.MUSIC_PATH} (service={config.MUSIC_URL}, {token})")
     if config.AI_ENABLED:
         state = "ready" if ai.configured() else "no shared token yet"
         print(f"[ai] gateway on /api/ai (service={config.AI_SERVICE_URL}, {state})")
@@ -502,6 +512,7 @@ async def lifespan(app: FastAPI):
             task.cancel()
         await metrics.close()
         await crimson.close()
+        await music.close()
         await ai.close()
         await db.close()
 
@@ -740,6 +751,62 @@ if config.CRIMSON_ENABLED:
         if _crimson_user(request) is None:
             return RedirectResponse("/login", status_code=303)
         return await crimson.proxy(request, config.CRIMSON_CLIENT_URL, path)
+
+
+# --- zer0space Music gateway ------------------------------------------------
+# Mounted only when MUSIC_URL is configured, so on a normal dashboard /music
+# simply 404s and nothing here runs. Music has no login of its own: the
+# zer0space session below is the only door, and src/music.py injects the shared
+# service token plus this user's id on every forwarded request.
+#
+# Unlike Crimson there is no API/SPA split — one upstream serves both — so a
+# single catch-all is enough.
+if config.MUSIC_ENABLED:
+
+    def _music_user(request: Request) -> tuple[str, str] | None:
+        """``(user_id, username)`` for a signed-in session, else ``None``."""
+        session = get_session(request)
+        if not session or not session.get("user_id"):
+            return None
+        return str(session["user_id"]), str(session.get("username") or "")
+
+    def _wants_html(request: Request) -> bool:
+        """Whether a 401 should redirect to the login page or answer as JSON.
+
+        A deep link typed into the address bar should land on the front door; a
+        fetch() from the player must get a status it can act on, because a 303
+        to an HTML login page parses as neither JSON nor audio and surfaces as a
+        confusing error instead of "your session expired".
+        """
+        return "text/html" in request.headers.get("accept", "")
+
+    @app.api_route(
+        "/music",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    async def music_root(request: Request) -> Response:
+        who = _music_user(request)
+        if who is None:
+            return RedirectResponse("/login", status_code=303)
+        # Redirect to the trailing-slash form: the player's assets and its
+        # service worker are registered relative to /music/, and without the
+        # slash the browser resolves them one level up against the dashboard.
+        return RedirectResponse(config.MUSIC_PATH + "/", status_code=307)
+
+    @app.api_route(
+        "/music/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def music_proxy(request: Request, path: str) -> Response:
+        who = _music_user(request)
+        if who is None:
+            if _wants_html(request):
+                return RedirectResponse("/login", status_code=303)
+            return fail(401, "UNAUTHORIZED", "Sign in to zer0space to use Music")
+        user, username = who
+        return await music.proxy(request, path, user=user, username=username)
 
 
 @app.exception_handler(ApiError)

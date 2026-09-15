@@ -269,6 +269,25 @@ CRIMSON_SSO_SECRET = read_secret("crimson_sso_secret", "CRIMSON_SSO_SECRET")
 CRIMSON_SSO_INVITE_CODE = os.environ.get("CRIMSON_SSO_INVITE_CODE", "") or None
 CRIMSON_SSO_ENABLED = bool(CRIMSON_ENABLED and CRIMSON_SSO_SECRET and CRIMSON_SSO_INVITE_CODE)
 
+# --- Music gateway ----------------------------------------------------------
+# zer0space Music (github.com/zer0space-net/zer0space-music) is the homelab's
+# music player: a Spotify-shaped UI over a Deezer catalogue, with audio resolved
+# by its own scraper. It is served at /music, gated on the zer0space session and
+# reverse-proxied by this dashboard to MUSIC_URL.
+#
+# Inert until MUSIC_URL is set — then /music simply 404s and the sidebar entry
+# stays hidden, so this is opt-in per deployment exactly like Crimson.
+MUSIC_PATH = "/music"
+MUSIC_URL = os.environ.get("MUSIC_URL", "").rstrip("/") or None
+MUSIC_ENABLED = bool(MUSIC_URL)
+# The music service publishes no ports and has no login: it trusts the identity
+# header below, but ONLY when this shared token is presented with it. The two
+# are always sent together (see src/music.py). Must match the value the music
+# service reads from its own music_service_token secret.
+MUSIC_SERVICE_TOKEN = read_secret("music_service_token", "MUSIC_SERVICE_TOKEN") or ""
+MUSIC_USER_HEADER = os.environ.get("MUSIC_USER_HEADER", "X-Zer0space-User")
+MUSIC_USER_NAME_HEADER = os.environ.get("MUSIC_USER_NAME_HEADER", "X-Zer0space-Username")
+
 # --- AI assistant -----------------------------------------------------------
 # The assistant lives in a separate service (github.com/zer0space-net/zer0space-ai)
 # that this dashboard gates and proxies at /api/ai/*. Only the *address* is

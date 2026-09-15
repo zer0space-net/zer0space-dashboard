@@ -142,8 +142,9 @@
 
   function wireNavigation() {
     document.querySelectorAll('.nav-item').forEach(function (item) {
-      // The Crimson entry is a real link (no data-view) — let the browser follow
-      // its href to /crimson rather than switching an in-page view.
+      // The Crimson and Music entries are real links (no data-view) — let the
+      // browser follow the href to that app rather than switching an in-page
+      // view. Both are separate services behind the gateway, not views here.
       if (!item.dataset.view) return;
       item.addEventListener('click', function () { setView(item.dataset.view); });
     });

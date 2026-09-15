@@ -71,6 +71,7 @@ window.ZS_DOCS = {
             de: [
               ['`zer0space-dashboard`', 'Das Dashboard, das du gerade benutzt: Landingpage, Dienste-Kacheln, Cluster-Status, Tresor, Benutzerverwaltung, Crimson-Gateway und AI-Gateway.', 'Python + Vanilla JS'],
               ['`zer0space-ai`', 'Der KI-Assistent als eigener Dienst. Kennt den Live-Zustand des Clusters, spricht mit Anthropic, OpenAI, Gemini oder einem lokalen Ollama.', 'Python'],
+              ['`zer0space-music`', 'Der Musikplayer: Spotify-Zuschnitt, Deezer-Katalog, eigener Audio-Scraper, Hintergrundwiedergabe auf dem Handy.', 'Python + Vanilla JS'],
               ['`zer0space-crimson-client`', 'Die Streaming-Oberfläche im zer0space-Look, React + Vite.', 'TypeScript'],
               ['`zer0space-crimson-backend`', 'Crimson Havens Backend (API, Datenbank, Sync-Worker) plus der zer0space-Build.', 'Python'],
               ['`zer0space-crimson-sources`', 'Crimson Havens Scrape-/Resolve-Engine, die im Browser des Zuschauers läuft.', 'TypeScript'],
@@ -2488,6 +2489,166 @@ async def crimson_media_proxy(request: Request, proxy_name: str) -> Response:
           title: { de: 'TMDB: der v4-Token, nicht der v3-Schlüssel', en: 'TMDB: the v4 token, not the v3 key' },
           de: 'Das Backend schickt TMDB als `Authorization: Bearer`, also muss `TMDB_API_KEY` das **v4 „API Read Access Token"** sein (der lange `eyJ…`-String), nicht der kurze v3-Schlüssel. Mit dem falschen bleibt der Katalog leer, ohne dass irgendwo ein Fehler auftaucht. Und der Antwort-Cache des Backends (`api_cache`) kann leere Ergebnisse konservieren: `DELETE FROM api_cache` plus `docker service update --force` räumt das ab.',
           en: 'The backend sends TMDB as `Authorization: Bearer`, so `TMDB_API_KEY` must be the **v4 "API Read Access Token"** (the long `eyJ…` string), not the short v3 key. With the wrong one the catalogue stays empty without an error appearing anywhere. And the backend\'s response cache (`api_cache`) can preserve empty results: `DELETE FROM api_cache` plus `docker service update --force` clears it.'
+        }
+      ]
+    },
+
+    /* ====================================================================== */
+    {
+      id: 'music',
+      icon: 'music',
+      title: { de: 'zer0space Music', en: 'zer0space Music' },
+      blocks: [
+        {
+          type: 'lead',
+          de: 'Ein Musikplayer im Spotify-Zuschnitt, hinter derselben Tür wie alles andere. Der Katalog kommt von Deezers öffentlicher API, der Ton wird pro Titel von einem eigenen Scraper aufgelöst — **ohne Konto, ohne API-Schlüssel, nirgends**. Das Kernstück ist die Hintergrundwiedergabe auf dem Handy: Bildschirm sperren, Musik läuft weiter, Sperrbildschirm zeigt Titel, Interpret und Cover.',
+          en: 'A Spotify-shaped music player, behind the same door as everything else. The catalogue comes from Deezer\'s public API and the audio is resolved per track by its own scraper — **no account and no API key anywhere**. The centrepiece is background playback on a phone: lock the screen, the music keeps going, and the lock screen shows title, artist and cover.'
+        },
+
+        { type: 'h3', de: 'Der Aufbau', en: 'The shape' },
+        {
+          type: 'figure',
+          code: {
+            de: [
+              '  Browser',
+              '     │  zer0space-Session — es gibt KEINEN Music-Login',
+              '     ▼',
+              '  Dashboard  /music/*  ──▶  zer0space-music   ──▶  Deezer  (Metadaten, Cover)',
+              '             Session-Gate      (KEINE Ports)   ──▶  yt-dlp  (Audio-URL)',
+              '             + Service-Token          │',
+              '             + X-Zer0space-User       └─ PostgreSQL  zer0space_music',
+              '                                         (Likes, Playlists, Verlauf)',
+              '',
+              '  Audio:  CDN ──▶ music ──▶ Dashboard ──▶ Handy',
+              '          (bewusst DURCH den Tunnel — anders als bei Crimson)'
+            ].join('\n'),
+            en: [
+              '  browser',
+              '     │  zer0space session — there is NO Music login',
+              '     ▼',
+              '  dashboard  /music/*  ──▶  zer0space-music   ──▶  Deezer  (metadata, covers)',
+              '             session gate      (NO ports)      ──▶  yt-dlp  (audio URL)',
+              '             + service token          │',
+              '             + X-Zer0space-User       └─ PostgreSQL  zer0space_music',
+              '                                         (likes, playlists, history)',
+              '',
+              '  audio:  CDN ──▶ music ──▶ dashboard ──▶ phone',
+              '          (deliberately THROUGH the tunnel — unlike Crimson)'
+            ].join('\n')
+          }
+        },
+        {
+          type: 'p',
+          de: 'Anders als Crimson hat Music **überhaupt keine Konten**. Crimson bringt ein eigenes Benutzersystem mit und brauchte dafür einen SSO-Broker (`src/crimson_sso.py`); Music vertraut schlicht der Benutzer-ID, die das Gateway mitschickt. Deshalb ist der Dienst auch deutlich kleiner.',
+          en: 'Unlike Crimson, Music has **no accounts at all**. Crimson brings its own user system and needed an SSO broker (`src/crimson_sso.py`) for it; Music simply trusts the user id the gateway forwards. That is why the service is a good deal smaller.'
+        },
+
+        { type: 'h3', de: 'Zwei Schlösser, nie nur eines', en: 'Two locks, never just one' },
+        {
+          type: 'p',
+          de: 'Der Music-Dienst veröffentlicht **keine Ports** und hat keinen Login. Er vertraut dem Header `X-Zer0space-User` — aber nur, wenn das gemeinsame Service-Token mitkommt. `src/music.py` setzt deshalb immer beides und entfernt jede vom Client mitgeschickte Kopie, **in jeder Schreibweise**: HTTP-Header sind case-insensitiv, ein Python-Dict ist es nicht. Genau so käme sonst ein Zuschauer an die Playlists eines anderen.',
+          en: 'The music service publishes **no ports** and has no login. It trusts the `X-Zer0space-User` header — but only when the shared service token comes with it. So `src/music.py` always sets both, and strips any client-supplied copy of either **in every letter-casing**: HTTP header names are case-insensitive, a Python dict is not. That is exactly how a viewer would otherwise reach someone else\'s playlists.'
+        },
+        {
+          type: 'note',
+          tone: 'warn',
+          title: { de: 'Beide Hälften müssen deployed sein', en: 'Both halves have to be deployed' },
+          de: 'Ohne `MUSIC_URL` ist das Gateway vollständig inert: `/music` gibt 404, der Sidebar-Eintrag bleibt versteckt. Und ohne `music_service_token` **auf beiden Seiten** leitet das Gateway Anfragen weiter, die der Music-Dienst dann mit 401 ablehnt. Die Bootzeile `[music] gateway on /music (…, token set)` sagt, was wirklich gilt.',
+          en: 'With `MUSIC_URL` unset the gateway is entirely inert: `/music` 404s and the sidebar entry stays hidden. And without `music_service_token` **on both sides**, the gateway forwards requests that the music service then rejects with 401. The boot line `[music] gateway on /music (…, token set)` states what is actually in effect.'
+        },
+
+        { type: 'h3', de: 'Hintergrundwiedergabe auf dem Handy', en: 'Background playback on a phone' },
+        {
+          type: 'p',
+          de: 'Das ist der Grund, warum es die App gibt — und der Teil, der am leichtesten kaputtgeht, weil jede falsche Variante **auf dem Desktop funktioniert** und erst auf einem echten Handy mit gesperrtem Bildschirm auffällt. Vier Regeln, alle in `static/js/player.js` des Music-Repos:',
+          en: 'This is why the app exists — and the part that breaks most easily, because every wrong version **works on a desktop** and only fails on a real phone with the screen locked. Four rules, all enforced in the music repo\'s `static/js/player.js`:'
+        },
+        {
+          type: 'ul',
+          de: [
+            '**Ein einziges `<audio>`-Element**, im HTML angelegt und nie ersetzt — nur `src` wechselt. Der naheliegende Entwurf, pro Titel ein `new Audio()`, zerstört die Hintergrundwiedergabe unter iOS: Das Betriebssystem hängt Media-Session *und* die Autoplay-Freigabe an ein *bestimmtes* Element. Ein frisch erzeugtes hat im Hintergrund weder das eine noch das andere — der erste Song läuft, danach bleibt die Warteschlange stumm stehen.',
+            '**Keine Web Audio API.** Ein `AudioContext` lässt iOS die Seite von „Medienwiedergabe" (läuft im Hintergrund weiter) zu „Web Audio" (wird im Hintergrund suspendiert) umklassifizieren. Ein Equalizer würde das ganze Feature kosten.',
+            '**MediaSession-Metadaten bei jedem Titelwechsel, vor `play()`.** Das ist, was Sperrbildschirm, Kontrollzentrum, Android-Benachrichtigung, Smartwatch und Autoradio anzeigen — und was dafür sorgt, dass Kopfhörer- und Lenkradtasten in dieser App landen statt in der, die zuletzt etwas abgespielt hat.',
+            '**`setPositionState()` bei jedem Tick**, sonst ist der Fortschrittsbalken auf dem Sperrbildschirm ein toter Strich und die ±15-Sekunden-Tasten unter iOS tun nichts.'
+          ],
+          en: [
+            '**One single `<audio>` element**, created in the HTML and never replaced — only its `src` changes. The obvious design, a `new Audio()` per track, destroys background playback on iOS: the OS attaches the media session *and* the autoplay activation to a *specific* element. A freshly created one has neither while backgrounded — the first song plays, then the queue silently stops.',
+            '**No Web Audio API.** An `AudioContext` makes iOS reclassify the page from "media playback" (keeps running in the background) to "web audio" (suspended when backgrounded). An equaliser would cost the entire feature.',
+            '**MediaSession metadata on every track change, before `play()`.** This is what the lock screen, Control Center, the Android notification, a smartwatch and a car head unit display — and what makes headset and steering-wheel buttons reach this app instead of whichever one set a session last.',
+            '**`setPositionState()` on every tick**, or the lock-screen scrubber is a dead bar and iOS\'s ±15-second buttons do nothing.'
+          ]
+        },
+        {
+          type: 'p',
+          de: 'Dazu ein PWA-Manifest mit `display: standalone`, damit der Player auf den Homescreen installiert werden kann — unter iOS hält das die Media-Session deutlich länger als ein in den Hintergrund geschobener Safari-Tab. Das Manifest wird pro Request erzeugt, damit `start_url` und `scope` das `/music`-Präfix des Gateways tragen; ein falscher Scope verhindert außerdem stillschweigend, dass sich der Service Worker registriert.',
+          en: 'Plus a PWA manifest with `display: standalone`, so the player can be installed to the home screen — on iOS that keeps the media session attached far longer than a backgrounded Safari tab. The manifest is built per request so its `start_url` and `scope` carry the gateway\'s `/music` prefix; a mismatched scope also silently stops the service worker from registering.'
+        },
+        {
+          type: 'note',
+          tone: 'ok',
+          title: { de: 'Warum das Ticket nicht an der Session hängt', en: 'Why the ticket is not tied to the session' },
+          de: 'Die `<audio>`-Quelle ist `/music/media/<signiertes-Ticket>`, und dieses Ticket trägt seine Berechtigung selbst — es wird **nicht** gegen die zer0space-Session geprüft. Das ist Absicht: Eine Anfrage, die der Medien-Stack des Betriebssystems nachspielt, nachdem die Seite in den Hintergrund gegangen ist, führt die Header der Seite nicht zuverlässig mit. Genau daran ist bei Crimson AirPlay gescheitert — der Apple TV holte die Playlist selbst und bekam 401, weshalb dort nachträglich der `?zt=`-Token entstand. Bei Music ist dieselbe Idee von Anfang an eingebaut.',
+          en: 'The `<audio>` source is `/music/media/<signed-ticket>`, and that ticket carries its own authorisation — it is **not** re-checked against the zer0space session. That is deliberate: a request the OS media stack replays after the page has been backgrounded does not reliably carry the headers the page would have added. This is exactly what broke AirPlay on Crimson — the Apple TV fetched the playlist itself and got a 401, which is why the `?zt=` token was added there afterwards. In Music the same idea is built in from the start.'
+        },
+
+        { type: 'h3', de: 'Range-Requests', en: 'Range requests' },
+        {
+          type: 'p',
+          de: 'Suchen im Titel ist genauso eine Server- wie eine Client-Sache. Das Gateway reicht `Range` nach oben durch und gibt `Accept-Ranges`, `Content-Range` und `Content-Length` zurück; `Accept-Encoding` wird entfernt, weil ein neu komprimierter Body die Byte-Offsets ungültig macht, in denen ein Range ausgedrückt ist. Safari prüft eine Medien-URL zuerst mit `Range: bytes=0-1`, bevor es überhaupt abspielt — ein Gateway ohne Range-Unterstützung liefert einem iPhone also einen Player, der nie startet.',
+          en: 'Seeking within a track is as much a server concern as a client one. The gateway forwards `Range` upstream and relays `Accept-Ranges`, `Content-Range` and `Content-Length` back; `Accept-Encoding` is stripped, because a re-compressed body invalidates the byte offsets a range is expressed in. Safari probes a media URL with `Range: bytes=0-1` before it will play at all — so a gateway without range support hands an iPhone a player that never starts.'
+        },
+
+        { type: 'h3', de: 'Medien durch den Tunnel — eine bewusste Ausnahme', en: 'Media through the tunnel — a deliberate exception' },
+        {
+          type: 'p',
+          de: 'Crimson hält Mediendaten **aus** dem Cloudflare-Tunnel heraus (ToS §2.8). Music tut das bewusst nicht: Audio hat etwa ein Fünfzigstel der Bitrate von Video, und die Alternative — ein nur über Tailscale erreichbarer Medien-Host — hieße keine Musik unterwegs, was die Handy-Unterstützung sinnlos machen würde. `MUSIC_MEDIA_BASE_URL` im Music-Dienst kann den Medien-Relay später auf einen Direkt-Host zeigen lassen, ohne die API mitzunehmen.',
+          en: 'Crimson keeps media bytes **off** the Cloudflare tunnel (ToS §2.8). Music deliberately does not: audio is roughly one fiftieth of video\'s bitrate, and the alternative — a Tailscale-only media host — would mean no music away from home, which defeats the phone support entirely. The music service\'s `MUSIC_MEDIA_BASE_URL` can point the media relay at a direct host later without moving the API with it.'
+        },
+
+        { type: 'h3', de: 'Der Akzent folgt dem Dashboard', en: 'The accent follows the dashboard' },
+        {
+          type: 'p',
+          de: 'Music liest `localStorage` unter `zs-theme` — dem Schlüssel dieses Dashboards. Weil das Gateway die App von **derselben Origin** ausliefert, ist dieser Speicher geteilt: Farbe hier wählen, Music öffnen, und der Player trägt sie bereits. Kein API-Aufruf, kein Query-Parameter, keine Schemaänderung. Ein `storage`-Listener färbt sogar einen offenen Player live um, wenn das Theme in einem anderen Tab gewechselt wird. Dieselbe Mechanik trägt die Sprache (`zs-lang`).',
+          en: 'Music reads `localStorage` under `zs-theme` — this dashboard\'s own key. Because the gateway serves the app from the **same origin**, that storage is shared: pick a colour here, open Music, and the player is already wearing it. No API call, no query parameter, no schema change. A `storage` listener even recolours an open player live when the theme is changed in another tab. The same mechanism carries the language (`zs-lang`).'
+        },
+
+        { type: 'h3', de: 'Der Scraper', en: 'The scraper' },
+        {
+          type: 'p',
+          de: 'Deezer sagt, **was** ein Song ist; der Scraper findet **etwas, das ihn abspielt**. Beide sind getrennte Schnittstellen, was die Audio-Seite austauschbar macht. Zwei Entscheidungen dort sind nicht offensichtlich: Die Dauer ist das Matching-Signal (sie ist auf beiden Seiten exakt, Titel sind es nie), und **m4a wird Opus vorgezogen, obwohl Opus besser klingt** — Safari kann Opus nicht abspielen, und Safari ist jeder Browser unter iOS. Ein Format, das das Handy nicht dekodiert, ist keine höhere Qualität, sondern Stille.',
+          en: 'Deezer says **what** a song is; the scraper finds **something that plays it**. They are separate interfaces, which is what makes the audio side replaceable. Two decisions there are not obvious: duration is the matching signal (it is exact on both sides, titles never are), and **m4a is preferred over Opus even though Opus sounds better** — Safari cannot play Opus, and Safari is every browser on iOS. A format the phone cannot decode is not higher quality, it is silence.'
+        },
+        {
+          type: 'note',
+          tone: 'warn',
+          title: { de: 'Wenn gar nichts mehr spielt: zuerst yt-dlp', en: 'If nothing plays any more: yt-dlp first' },
+          de: '`yt-dlp` ist die eine Abhängigkeit, die nicht sanft degradiert. Ändert YouTube seinen Player, löst ein veralteter Pin **jeden** Titel gleichzeitig nicht mehr auf — ohne dass im Diff irgendetwas dazu steht. Beim Bau dieser App scheiterte ein rund 20 Monate alter Pin an jeder einzelnen Extraktion mit `The page needs to be reloaded`, während die Suche weiter das richtige Video fand; das sieht nach einem Matching-Fehler aus und ist ein Versionsproblem. Ein wöchentlicher Workflow im Music-Repo legt ein Issue an, sobald eine neuere Version existiert.',
+          en: '`yt-dlp` is the one dependency that does not degrade gracefully. When YouTube changes its player, a stale pin stops resolving **every** track at once — with nothing in the diff to explain it. While building this app a pin roughly 20 months old failed every single extraction with `The page needs to be reloaded` while the search step still found the right video; that looks like a matching bug and is a version problem. A weekly workflow in the music repo opens an issue as soon as a newer release exists.'
+        },
+
+        { type: 'h3', de: 'Konfiguration', en: 'Configuration' },
+        {
+          type: 'table',
+          head: { de: ['Variable', 'Bedeutung'], en: ['Variable', 'Meaning'] },
+          rows: {
+            de: [
+              ['`MUSIC_URL`', 'Adresse des Music-Dienstes, z. B. `http://music:8000`. **Nicht gesetzt = alles inert**: `/music` gibt 404, der Sidebar-Eintrag bleibt versteckt.'],
+              ['`MUSIC_SERVICE_TOKEN`', 'Gemeinsames Token, Swarm-Secret `music_service_token`. Muss auf beiden Seiten **byteweise identisch** sein.'],
+              ['`MUSIC_USER_HEADER`', 'Name des Identitäts-Headers. Standard `X-Zer0space-User`.'],
+              ['`MUSIC_USER_NAME_HEADER`', 'Anzeigename, nur für die Begrüßung. Standard `X-Zer0space-Username`.']
+            ],
+            en: [
+              ['`MUSIC_URL`', 'Address of the music service, e.g. `http://music:8000`. **Unset = everything is inert**: `/music` 404s and the sidebar entry stays hidden.'],
+              ['`MUSIC_SERVICE_TOKEN`', 'Shared token, Swarm secret `music_service_token`. Must be **byte-identical** on both sides.'],
+              ['`MUSIC_USER_HEADER`', 'Identity header name. Defaults to `X-Zer0space-User`.'],
+              ['`MUSIC_USER_NAME_HEADER`', 'Display name, for the greeting only. Defaults to `X-Zer0space-Username`.']
+            ]
+          }
+        },
+        {
+          type: 'p',
+          de: 'Der vollständige Deploy-Ablauf — Datenbank `zer0space_music`, die beiden Secrets, die Portainer-Schritte — steht in `docs/deploy.md` im Music-Repo. Die Dashboard-Seite ist in `docs/music.md` beschrieben.',
+          en: 'The full deployment runbook — the `zer0space_music` database, the two secrets, the Portainer steps — is in `docs/deploy.md` in the music repo. The dashboard side is described in `docs/music.md`.'
         }
       ]
     },
