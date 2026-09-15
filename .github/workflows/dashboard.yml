@@ -82,15 +82,17 @@ jobs:
       # went stale while main kept moving. A credential that has to be rotated
       # by hand is a deploy that breaks on a date nobody has written down.
       #
-      # GITHUB_TOKEN is minted per run and cannot expire. It only carries write
-      # access to packages the package itself has granted this repository, so it
-      # works ONLY once the container package has this repo added under
-      # "Manage Actions access" with the Write role:
+      # GITHUB_TOKEN is minted per run and cannot expire.
       #
+      # The old comment here claimed GITHUB_TOKEN could not work because this
+      # GHCR package predates the repository and was never linked to it. That
+      # was wrong: the switch worked on the first run with no package setting
+      # touched. The package is owned by the same org as this repo, which is
+      # enough. Do not reintroduce a PAT on the strength of that old claim.
+      #
+      # If this step ever does fail with "denied", check the package's
+      # "Manage Actions access" list before suspecting a credential:
       #   github.com/orgs/zer0space-net/packages/container/zer0space-dashboard/settings
-      #
-      # That is a one-time click. If it is ever undone this step fails the same
-      # way again — check that page first, not the token.
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
