@@ -7,12 +7,19 @@ on:
       - 'src/**'
       - 'static/**'
       - 'templates/**'
+      # The Dockerfile COPYs this in too (it's the break-glass unlock tool,
+      # meant to run via `docker exec` inside the built container) — a change
+      # here was silently not rebuilding the image at all until this line was
+      # added. If you add another top-level directory the Dockerfile COPYs,
+      # it needs a line here too, or the same thing happens again.
+      - 'scripts/**'
       - 'Dockerfile'
       - 'requirements.txt'
       - '.github/workflows/dashboard.yml'
   pull_request:
     paths:
       - 'src/**'
+      - 'scripts/**'
       - 'requirements.txt'
   workflow_dispatch:
 
