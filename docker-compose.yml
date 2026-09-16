@@ -100,11 +100,13 @@ services:
       # Portainer if the backend listens on a different port, etc. Leave the URLs
       # blank to turn the whole gateway off (then /crimson 404s).
       # ── zer0space Music gateway ─────────────────────────────────────
-      # The music player, reverse-proxied at /music. Blank turns the whole
+      # The music player, reverse-proxied at /music. The Swarm service DNS
+      # name from the music stack's own compose file, on the shared network —
+      # same pattern as CRIMSON_CLIENT_URL below. Blank turns the whole
       # gateway off: /music 404s and the sidebar entry stays hidden. The shared
-      # music_service_token secret below is what makes the identity header this
-      # gateway sends trustworthy — both are needed.
-      - MUSIC_URL=${MUSIC_URL:-}
+      # music_service_token secret (see secrets: below) is what makes the
+      # identity header this gateway sends trustworthy — both are needed.
+      - MUSIC_URL=${MUSIC_URL:-http://music:8000}
       - CRIMSON_CLIENT_URL=${CRIMSON_CLIENT_URL:-http://zer0space-crimson-client:80}
       - CRIMSON_API_URL=${CRIMSON_API_URL:-http://zer0space-crimson-api:8000}
       # No default anymore; This is a live registration credential for the Crimson
@@ -132,12 +134,9 @@ services:
       - session_secret
       - totp_enc_key
       - crimson_sso_secret
-      # Shared with the music service, and OPT-IN like the ai secrets below.
-      # Left commented out because declaring an external secret that does not
-      # exist makes the WHOLE stack fail to deploy — so this must not become a
-      # trap for a dashboard that is not running Music. Create the secret, then
-      # uncomment this line and set MUSIC_URL. See docs/music.md.
-      # - music_service_token
+      # Shared with the music service. The secret exists (created alongside the
+      # music stack) — see docs/music.md.
+      - music_service_token
       # ai_service_token is shared with the ai service below and is OPT-IN.
       # Left commented out, both services fall back to a value generated once and
       # stored in the settings table, which they both read, so a first deploy
@@ -414,16 +413,8 @@ secrets:
   crimson_sso_secret:
     external: true
   # Shared with the zer0space-music stack, which reads the SAME secret object.
-  # OPT-IN, for the same reason as the ai secrets below: an external secret that
-  # does not exist fails the whole stack deploy. Create it with printf %s, so no
-  # trailing newline ends up inside the value:
-  #
-  #   printf %s 'PASTE-A-RANDOM-TOKEN' | docker secret create music_service_token -
-  #
-  # Then uncomment this AND the matching line in the dashboard service above,
-  # and set MUSIC_URL. Until then /music 404s and the sidebar entry is hidden.
-  # music_service_token:
-  #   external: true
+  music_service_token:
+    external: true
   # Shared between the dashboard and the ai service, and OPT-IN. Declaring an
   # external secret that does not exist makes the whole stack fail to deploy, so
   # these stay commented out until you have actually created them:
