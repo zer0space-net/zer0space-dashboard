@@ -72,6 +72,7 @@ src/
 ├── vault.py     PBKDF2 + AES-256-GCM, vault CRUD helpers
 ├── metrics.py   Docker socket proxy + Glances polling, status tiles
 ├── ai.py        Gateway to the zer0space-ai service (session gate + proxy)
+├── app_release.py  Latest Android app release from GitHub (Settings → App, in-app updates)
 └── main.py      FastAPI app: middleware, routes, lifespan
 static/
 ├── css/  main.css (design system) + one file per page family
@@ -88,6 +89,7 @@ scripts/
 └── unlock-user.py  Break-glass account unlock (see docs/security.md)
 docs/
 ├── security.md   Auth system, invite flow, secrets, rate limits, vault
+├── android-app.md  The Android app: release lookup, download, in-app update flow
 ├── ai.md         The AI assistant integration and its boundaries
 └── design.md     The visual language and where the artwork comes from
 ```

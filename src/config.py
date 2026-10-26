@@ -14,6 +14,7 @@ a Swarm. This is why no password appears in ``docker-compose.yml``.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from ipaddress import ip_address, ip_network
 from pathlib import Path
@@ -287,6 +288,18 @@ MUSIC_ENABLED = bool(MUSIC_URL)
 MUSIC_SERVICE_TOKEN = read_secret("music_service_token", "MUSIC_SERVICE_TOKEN") or ""
 MUSIC_USER_HEADER = os.environ.get("MUSIC_USER_HEADER", "X-Zer0space-User")
 MUSIC_USER_NAME_HEADER = os.environ.get("MUSIC_USER_NAME_HEADER", "X-Zer0space-Username")
+
+# --- Android app ------------------------------------------------------------
+# The zer0space Android app (github.com/zer0space-net/zer0space-android-app) is
+# offered under Settings → App, and its in-app updater asks this dashboard which
+# release is current. That is read from the repo's public GitHub Releases, so no
+# token is needed. On by default because it needs nothing from the stack: set
+# APP_RELEASE_REPO to an empty string to hide the tab entirely.
+APP_RELEASE_REPO = os.environ.get(
+    "APP_RELEASE_REPO", "zer0space-net/zer0space-android-app"
+).strip().strip("/")
+APP_ENABLED = bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", APP_RELEASE_REPO))
+APP_DOWNLOAD_PATH = "/app/download"
 
 # --- AI assistant -----------------------------------------------------------
 # The assistant lives in a separate service (github.com/zer0space-net/zer0space-ai)

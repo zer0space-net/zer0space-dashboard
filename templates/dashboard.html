@@ -295,6 +295,12 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5.5c0 4.3 3 7.3 7 8.5 4-1.2 7-4.2 7-8.5V6Z"/><path d="M9.2 12.2 11 14l4-4.2"/></svg>
               <span data-i18n="settings.tabSecurity">Sicherheit</span>
             </button>
+            {% if app_enabled %}
+            <button type="button" class="settings-tab" role="tab" aria-selected="false" data-tab="app">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2.8" width="11" height="18.4" rx="2.4"/><path d="M10.5 18h3"/><path d="M12 7.2v6.2M9.6 11l2.4 2.4 2.4-2.4"/></svg>
+              <span data-i18n="settings.tabApp">App</span>
+            </button>
+            {% endif %}
             <button type="button" class="settings-tab admin-only" role="tab" aria-selected="false" data-tab="services" hidden>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></svg>
               <span data-i18n="settings.tabServices">Dienste</span>
@@ -728,6 +734,54 @@
           </div>
           </div><!-- /pane services -->
 
+          {% if app_enabled %}
+          <!-- Filled by app-download.js. Everything inside #app-release is built
+               with textContent, so the release notes (free text from GitHub)
+               never reach innerHTML. -->
+          <div class="tab-pane" data-pane="app" role="tabpanel" hidden>
+          <div class="panel glass">
+            <header class="panel-head"><h2 data-i18n="app.title">zer0space für Android</h2></header>
+            <div class="panel-body stack gap-14">
+              <p class="faint" data-i18n="app.intro">
+                Die App ist zer0space wie im Browser, mit einem Unterschied: Crimson löst Serien und
+                Filme über dein eigenes Gerät auf, und Musik läuft bei gesperrtem Bildschirm weiter.
+              </p>
+              <div class="alert alert-ok" id="app-installed" role="status" hidden></div>
+              <div class="alert alert-error" id="app-error" role="alert" hidden></div>
+              <div id="app-release" class="stack gap-10" hidden>
+                <div class="row gap-10 app-release-head">
+                  <strong id="app-version"></strong>
+                  <span class="faint" id="app-meta"></span>
+                </div>
+                <div class="row gap-10">
+                  <a class="btn btn-primary" id="app-download" href="/app/download" data-i18n="app.download">APK herunterladen</a>
+                  <button type="button" class="btn btn-primary" id="app-update" hidden data-i18n="app.updateNow">Jetzt aktualisieren</button>
+                </div>
+                <div class="faint" id="app-progress" role="status" hidden></div>
+                <details class="app-notes" id="app-notes-wrap" hidden>
+                  <summary data-i18n="app.notes">Was ist neu</summary>
+                  <pre class="app-notes-body" id="app-notes"></pre>
+                </details>
+              </div>
+              <p class="faint" id="app-none" hidden data-i18n="app.none">Noch keine Version veröffentlicht.</p>
+              <div class="app-qr-wrap" id="app-qr-wrap" hidden>
+                <p class="faint" data-i18n="app.qrHint">Am Computer? Code mit dem Handy scannen:</p>
+                <img id="app-qr" alt="" width="180" height="180">
+              </div>
+              <div class="stack gap-6">
+                <strong data-i18n="app.howTitle">So installierst du sie</strong>
+                <ol class="app-steps faint">
+                  <li data-i18n="app.step1">APK auf dem Android-Handy herunterladen.</li>
+                  <li data-i18n="app.step2">Öffnen und dem Browser erlauben, Apps zu installieren („Unbekannte Apps installieren“).</li>
+                  <li data-i18n="app.step3">Installieren, öffnen, mit deinem zer0space-Konto anmelden.</li>
+                  <li data-i18n="app.step4">Updates meldet die App selbst. Ein Tipp auf „Aktualisieren“ genügt, deine Anmeldung bleibt erhalten.</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+          </div><!-- /pane app -->
+          {% endif %}
+
         </div>
       </section>
     </main>
@@ -893,6 +947,11 @@
 {# Defines window.ZS_AI. Loaded before app.js, which calls into it when the AI
    view opens and when the language changes. #}
 <script src="/static/js/ai.js?v={{ asset_version }}" defer></script>
+{% endif %}
+{% if app_enabled %}
+{# Settings → App and the update banner inside the Android app. Independent of
+   app.js: it only reads the release and the app's own bridge. #}
+<script src="/static/js/app-download.js?v={{ asset_version }}" defer></script>
 {% endif %}
 <script src="/static/js/app.js?v={{ asset_version }}" defer></script>
 {% endblock %}

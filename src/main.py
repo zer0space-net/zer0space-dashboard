@@ -35,18 +35,19 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
+from anyio import to_thread
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import ai, auth, config, crimson, crimson_sso, db, metrics, music, totp, vault
+from . import ai, app_release, auth, config, crimson, crimson_sso, db, metrics, music, totp, vault
 
 # Bump when static assets change in a way browsers must not keep. Templates
 # append it to every CSS/JS URL, which is what makes it safe to serve them with
 # a long max-age despite there being no build step and no content hashes.
-ASSET_VERSION = "4.6.1"
+ASSET_VERSION = "4.7.0"
 
 # Ceiling on a buffered request body. The API only ever receives small JSON
 # objects — the largest legitimate one is a vault entry, capped by
@@ -151,6 +152,8 @@ def page(request: Request, name: str, **context: Any) -> Response:
             # Show the AI chat panel only when the gateway is wired. The panel is
             # useless without it, and an empty view is worse than no view.
             "ai_enabled": config.AI_ENABLED,
+            # Settings → App, the Android app download and in-app updates.
+            "app_enabled": config.APP_ENABLED,
             **context,
         },
     )
@@ -1277,6 +1280,48 @@ async def api_me(request: Request) -> Response:
             "totpEnabled": bool(user["totp_enabled"]) if user else False,
         }
     )
+
+
+# --- Android app ------------------------------------------------------------
+# Settings → App and the app's own updater. Session-gated like everything that
+# is not the landing page: the APK is public on GitHub anyway, but the site it
+# opens is not, and there is no reason to advertise either to the world.
+
+
+@app.get("/api/app/release")
+async def api_app_release(request: Request) -> Response:
+    _require_session(request)
+    if not config.APP_ENABLED:
+        return JSONResponse({"available": False, "enabled": False})
+    release = await app_release.latest()
+    if release is None:
+        return JSONResponse({"available": False, "enabled": True})
+    return JSONResponse({**release.public(), "enabled": True})
+
+
+@app.get("/api/app/qr")
+async def api_app_qr(request: Request) -> Response:
+    """A QR code of the download link, for opening it on a phone from a desktop."""
+    _require_session(request)
+    if not config.APP_ENABLED:
+        raise ApiError(404, "NOT_FOUND", "Not found")
+    base = config.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+    url = base + config.APP_DOWNLOAD_PATH
+    data_uri = await to_thread.run_sync(totp.qr_data_uri, url)
+    return JSONResponse({"qr": data_uri, "url": url})
+
+
+@app.get(config.APP_DOWNLOAD_PATH, include_in_schema=False)
+async def app_download(request: Request) -> Response:
+    # A link a phone opens from the QR code, so an anonymous visitor goes
+    # through the front door rather than getting a JSON 401.
+    if not (get_session(request) or {}).get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    release = await app_release.latest() if config.APP_ENABLED else None
+    if release is None:
+        return RedirectResponse("/dashboard", status_code=303)
+    # app_release only ever yields a URL under this repo's own release downloads.
+    return RedirectResponse(release.apk_url, status_code=302)
 
 
 @app.post("/api/change-password")
